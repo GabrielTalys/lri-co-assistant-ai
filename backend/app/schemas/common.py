@@ -86,6 +86,13 @@ class AISpecialistOut(BaseModel):
     created_at: datetime
 
 
+class AISpecialistAssessmentOut(BaseModel):
+    participant_id: int
+    cycle: int
+    scores: dict[str, int]
+    comment: str
+
+
 class InviteCreate(BaseModel):
     role: str = 'collaborator'
     name: str | None = None

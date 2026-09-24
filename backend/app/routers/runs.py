@@ -12,6 +12,7 @@ from app.db.session import get_db
 from app.models import Decision, Export, RunStatus, User
 from app.repositories import CanvasRepository, InviteRepository, ParticipantRepository, RunRepository, ScoreRepository
 from app.schemas.common import (
+    AISpecialistAssessmentOut,
     AISpecialistOut,
     AISpecialistUpsert,
     DecisionRequest,
@@ -68,6 +69,8 @@ def _ai_specialist_service(db: Session) -> AISpecialistService:
     return AISpecialistService(
         run_repo=RunRepository(db),
         participant_repo=ParticipantRepository(db),
+        canvas_repo=CanvasRepository(db),
+        score_service=_score_service(db),
     )
 
 
@@ -264,6 +267,25 @@ def get_ai_specialist(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return _ai_specialist_out_payload(specialist)
+
+
+@router.post('/runs/{run_id}/ai-specialist/assessment', response_model=AISpecialistAssessmentOut)
+@router.post('/projects/{run_id}/ai-specialist/assessment', response_model=AISpecialistAssessmentOut)
+def generate_ai_specialist_assessment(
+    run_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    svc = _ai_specialist_service(db)
+    try:
+        assessment = svc.generate_assessment(run_id=run_id, owner_user_id=current_user.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    db.commit()
+    return assessment
 
 
 @router.delete('/runs/{run_id}', response_model=RunDeleteResponse)

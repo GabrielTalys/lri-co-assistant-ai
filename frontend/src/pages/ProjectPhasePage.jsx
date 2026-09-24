@@ -215,6 +215,8 @@ export default function ProjectPhasePage({ token, me }) {
   const [aiSpecialistConfigured, setAiSpecialistConfigured] = useState(false);
   const [isLoadingAiSpecialist, setIsLoadingAiSpecialist] = useState(false);
   const [isSavingAiSpecialist, setIsSavingAiSpecialist] = useState(false);
+  const [isGeneratingAiAssessment, setIsGeneratingAiAssessment] =
+    useState(false);
   const [assessment, setAssessment] = useState({
     valuable: 1,
     feasible: 1,
@@ -1162,6 +1164,26 @@ export default function ProjectPhasePage({ token, me }) {
     }
   }
 
+  async function generateAiSpecialistAssessment() {
+    if (isParticipant || routePhase !== 4 || isGeneratingAiAssessment) return;
+
+    try {
+      setIsGeneratingAiAssessment(true);
+      await api(
+        `/projects/${projectId}/ai-specialist/assessment`,
+        "POST",
+        {},
+        token
+      );
+      await refreshCompletion();
+      setTimedActionMessage("AI specialist assessment generated.", 2500);
+    } catch (err) {
+      setActionMessage(err.message);
+    } finally {
+      setIsGeneratingAiAssessment(false);
+    }
+  }
+
   async function saveAssessmentCriterion(criterion, value, comment) {
     if (!actorParticipantId || !value) return false;
 
@@ -1751,9 +1773,19 @@ export default function ProjectPhasePage({ token, me }) {
                     {completionInfo.all_done
                       ? `All participants completed (${completionInfo.completed_respondents}/${completionInfo.required_respondents})`
                       : `Waiting for participants (${completionInfo.completed_respondents}/${completionInfo.required_respondents})`}
-                    {completionInfo.pending_invites > 0 &&
+                  {completionInfo.pending_invites > 0 &&
                       ` - ${completionInfo.pending_invites} invite(s) pending acceptance`}
                   </p>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={generateAiSpecialistAssessment}
+                    disabled={isGeneratingAiAssessment}
+                  >
+                    {isGeneratingAiAssessment
+                      ? "Generating AI assessment..."
+                      : "Generate AI Specialist Assessment"}
+                  </button>
                 </div>
               )}
             </>
