@@ -171,8 +171,15 @@ class ScoreService:
             if not comment:
                 continue
 
+            participant = participants.get(row.participant_id)
+            ai_display_name = (
+                (participant.display_name or '').strip()
+                if participant is not None and participant.is_ai
+                else ''
+            )
             participant_label = (
-                _capitalize_name(invite_name_by_participant.get(row.participant_id))
+                ai_display_name
+                or _capitalize_name(invite_name_by_participant.get(row.participant_id))
                 or f'Participant {row.participant_id}'
             )
 
