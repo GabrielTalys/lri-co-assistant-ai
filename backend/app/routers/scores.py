@@ -80,6 +80,7 @@ def get_scores(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     payload = {'criteria': criteria, **completion}
     payload['comments'] = svc.get_comments_by_participant(run_id=run_id)
+    payload['individual_assessments'] = svc.get_individual_assessments(run_id=run_id)
     if participant_id is not None:
         try:
             payload['participant_scores'] = svc.get_participant_scores(run_id=run_id, participant_id=participant_id)

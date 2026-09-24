@@ -54,6 +54,12 @@ const phase5ResultOrder = [
   { metricKey: "feasibility", label: "Feasibility" },
 ];
 
+const individualAssessmentOrder = [
+  { metricKey: "impact", label: "Value" },
+  { metricKey: "feasibility", label: "Feasibility" },
+  { metricKey: "alignment", label: "Applicability" },
+];
+
 const metricKeyToCriterionLabel = {
   impact: "Valuable",
   alignment: "Applicable",
@@ -240,6 +246,9 @@ export default function ProjectPhasePage({ token, me }) {
   });
   const [resultsInfo, setResultsInfo] = useState(null);
   const [commentsInfo, setCommentsInfo] = useState([]);
+  const [individualAssessments, setIndividualAssessments] = useState([]);
+  const [expandedIndividualAssessments, setExpandedIndividualAssessments] =
+    useState({});
   const [problemSynthesis, setProblemSynthesis] = useState("");
   const [selectedDecision, setSelectedDecision] = useState(null);
 
@@ -1125,9 +1134,17 @@ export default function ProjectPhasePage({ token, me }) {
       const data = await loadScores();
       setResultsInfo(data.criteria || null);
       setCommentsInfo(Array.isArray(data.comments) ? data.comments : []);
+      setIndividualAssessments(
+        Array.isArray(data.individual_assessments)
+          ? data.individual_assessments
+          : []
+      );
+      setExpandedIndividualAssessments({});
     } catch {
       setResultsInfo(null);
       setCommentsInfo([]);
+      setIndividualAssessments([]);
+      setExpandedIndividualAssessments({});
     }
   }
 
@@ -1828,6 +1845,79 @@ export default function ProjectPhasePage({ token, me }) {
               ) : (
                 <p className="muted">No score aggregates available yet.</p>
               )}
+
+              <div className="decision-section">
+                <div className="decision-divider" />
+                <h2>Individual Assessments</h2>
+                {individualAssessments.length > 0 ? (
+                  <div className="individual-assessments-grid">
+                    {individualAssessments.map((entry) => {
+                      const isExpanded = Boolean(
+                        expandedIndividualAssessments[entry.participant_id]
+                      );
+                      const isAiSpecialist = Boolean(entry.is_ai);
+                      return (
+                        <div
+                          className="field-card individual-assessment-card"
+                          key={entry.participant_id}
+                        >
+                          <button
+                            type="button"
+                            className="individual-assessment-toggle"
+                            aria-expanded={isExpanded}
+                            onClick={() =>
+                              setExpandedIndividualAssessments((previous) => ({
+                                ...previous,
+                                [entry.participant_id]: !isExpanded,
+                              }))
+                            }
+                          >
+                            <span className="individual-assessment-heading">
+                              <strong>{entry.participant_label || "Participant"}</strong>
+                              {isAiSpecialist && (
+                                <span className="ai-specialist-badge">
+                                  AI Specialist
+                                </span>
+                              )}
+                            </span>
+                            <span aria-hidden="true">{isExpanded ? "▾" : "▸"}</span>
+                          </button>
+                          {isExpanded && (
+                            <div className="individual-assessment-content">
+                              {isAiSpecialist && (
+                                <p className="ai-specialist-specialty">
+                                  AI Specialist · {entry.ai_specialty || "No specialty provided"}
+                                </p>
+                              )}
+                              {individualAssessmentOrder.map(({ metricKey, label }) => {
+                                const assessment = entry.scores?.[metricKey] || {};
+                                return (
+                                  <div
+                                    className="individual-metric"
+                                    key={`${entry.participant_id}-${metricKey}`}
+                                  >
+                                    <h4>{label}</h4>
+                                    <p>
+                                      <strong>Score:</strong>{" "}
+                                      {assessment.score ?? "Not submitted"}
+                                    </p>
+                                    <p>
+                                      <strong>Comment:</strong>{" "}
+                                      {assessment.comment || "No comment provided"}
+                                    </p>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="muted">No individual assessments available yet.</p>
+                )}
+              </div>
 
               {!isParticipant && (
                 <div className="decision-section">

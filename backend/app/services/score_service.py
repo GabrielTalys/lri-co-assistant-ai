@@ -195,6 +195,52 @@ class ScoreService:
 
         return sorted(grouped.values(), key=lambda item: str(item.get('participant_label', '')).lower())
 
+    def get_individual_assessments(self, run_id: int) -> list[dict]:
+        run = self.run_repo.get(run_id)
+        if run is None:
+            raise ValueError('Run not found')
+
+        participants = {p.id: p for p in self.participant_repo.list_by_run(run_id)}
+        invite_name_by_participant: dict[int, str] = {}
+        for invite in self.invite_repo.list_by_run(run_id):
+            participant_id = invite.accepted_participant_id
+            if participant_id is None or participant_id in invite_name_by_participant:
+                continue
+            assigned_name = (invite.participant_name or invite.invitee_name or '').strip()
+            if assigned_name:
+                invite_name_by_participant[participant_id] = assigned_name
+
+        grouped: dict[int, dict] = {}
+        for row in self.score_repo.list_by_run(run_id, cycle=run.current_cycle):
+            participant = participants.get(row.participant_id)
+            is_ai = bool(participant and participant.is_ai)
+            display_name = (participant.display_name or '').strip() if participant else ''
+            participant_label = (
+                display_name
+                if is_ai and display_name
+                else _capitalize_name(invite_name_by_participant.get(row.participant_id))
+                or f'Participant {row.participant_id}'
+            )
+
+            entry = grouped.setdefault(
+                row.participant_id,
+                {
+                    'participant_id': row.participant_id,
+                    'participant_label': participant_label,
+                    'display_name': display_name or None,
+                    'is_ai': is_ai,
+                    'ai_specialty': (participant.ai_specialty or '').strip() or None if participant else None,
+                    'cycle': run.current_cycle,
+                    'scores': {},
+                },
+            )
+            entry['scores'][row.metric_key] = {
+                'score': row.value,
+                'comment': (row.comment or '').strip() or None,
+            }
+
+        return sorted(grouped.values(), key=lambda item: str(item.get('participant_label', '')).lower())
+
     def reset_participant_scores(self, run_id: int, participant_id: int) -> int:
         run = self.run_repo.get(run_id)
         if run is None:

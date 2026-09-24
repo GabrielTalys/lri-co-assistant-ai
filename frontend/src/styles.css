@@ -659,6 +659,76 @@ textarea {
   margin-top: 10px;
 }
 
+.individual-assessments-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.individual-assessment-card {
+  padding: 0;
+  overflow: hidden;
+}
+
+.individual-assessment-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.individual-assessment-toggle:hover {
+  background: #f7f9fd;
+}
+
+.individual-assessment-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ai-specialist-badge {
+  border: 1px solid #9ac2ff;
+  border-radius: 999px;
+  padding: 2px 7px;
+  color: #1c4ea3;
+  background: #eaf2ff;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.individual-assessment-content {
+  border-top: 1px solid var(--border);
+  padding: 14px 16px 16px;
+}
+
+.ai-specialist-specialty {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.individual-metric + .individual-metric {
+  border-top: 1px solid var(--border);
+  margin-top: 12px;
+  padding-top: 12px;
+}
+
+.individual-metric h4,
+.individual-metric p {
+  margin: 0;
+}
+
+.individual-metric p + p {
+  margin-top: 5px;
+}
+
 .decision-primary-action {
   margin-top: 14px;
 }
