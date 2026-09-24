@@ -56,6 +56,9 @@ class ScoreService:
             raise ValueError('Metric already submitted by participant')
 
         normalized_comment = (comment or '').strip() or None
+        if participant.is_ai and normalized_comment is None:
+            raise ValueError('AI specialist scores require a comment')
+
         return self.score_repo.create(
             run_id=run_id,
             participant_id=participant_id,
