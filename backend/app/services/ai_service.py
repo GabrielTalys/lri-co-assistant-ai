@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
 from app.models import AISuggestionStatus
-from app.repositories import AISuggestionRepository, CanvasRepository, RunRepository
+from app.repositories import AISuggestionRepository, CanvasRepository, ParticipantRepository, RunRepository
 from app.services.llm_client import get_llm_client
 
 
@@ -21,6 +21,7 @@ class AISuggestionService:
         self.run_repo = RunRepository(db)
         self.canvas_repo = CanvasRepository(db)
         self.ai_repo = AISuggestionRepository(db)
+        self.participant_repo = ParticipantRepository(db)
         self.llm_client = get_llm_client()
 
     def _response_cycle_for_run(self, run) -> int:
@@ -105,7 +106,28 @@ class AISuggestionService:
             f'\n{field_specific_instruction}'
         )
 
-    def _prompt_for_phase3_overview(self, question, question_content: str, context_text: str) -> str:
+    def _get_ai_specialty(self, run_id: int) -> str | None:
+        specialist = self.participant_repo.find_ai_by_run(run_id)
+        specialty = (specialist.ai_specialty or '').strip() if specialist else ''
+        return specialty or None
+
+    def _prompt_for_phase3_overview(
+        self,
+        question,
+        question_content: str,
+        context_text: str,
+        ai_specialty: str | None = None,
+    ) -> str:
+        specialist_instruction = ''
+        if ai_specialty:
+            specialist_instruction = (
+                'Additional specialist perspective:\n'
+                f'Also analyze the problem from the perspective of a specialist in {ai_specialty}.\n'
+                'This specialty is an additional perspective and does not replace the general analysis.\n'
+                'Use it only to identify relevant aspects, risks, opportunities, or points of attention.\n'
+                'Do not invent facts about the organization, market, customers, or data not present in the provided context.\n'
+                'Make clear when conclusions are based only on the provided context.\n\n'
+            )
         return (
             'You are assisting a Lean Research Inception workshop facilitator.\n'
             'Review one fully completed phase 3 canvas in the context of the whole formulated problem.\n'
@@ -114,6 +136,7 @@ class AISuggestionService:
             f'{question_content}\n\n'
             'Complete phase 3 context:\n'
             f'{context_text}\n\n'
+            f'{specialist_instruction}'
             'Return only the analysis for the target canvas.\n'
             'Use exactly this structure:\n'
             'Overview: <short synthesis of what this canvas currently expresses and how it contributes to the problem formulation>\n'
@@ -313,6 +336,7 @@ class AISuggestionService:
         if empty_questions:
             raise ValueError('Fill every canvas field before requesting the overview')
 
+        ai_specialty = self._get_ai_specialty(run_id)
         overviews = {}
         for item in filled_items:
             question = item['question']
@@ -320,6 +344,7 @@ class AISuggestionService:
                 question,
                 item['content'],
                 context_text,
+                ai_specialty,
             )
             overview_text = self.llm_client.generate(prompt).strip()
             if not overview_text:
@@ -347,11 +372,13 @@ class AISuggestionService:
         if target_item is None:
             raise ValueError('Unknown canvas question key')
 
+        ai_specialty = self._get_ai_specialty(run_id)
         question = target_item['question']
         prompt = self._prompt_for_phase3_overview(
             question,
             target_item['content'],
             context_text,
+            ai_specialty,
         )
         overview_text = self.llm_client.generate(prompt).strip()
         if not overview_text:

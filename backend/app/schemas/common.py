@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class LoginRequest(BaseModel):
@@ -58,6 +58,31 @@ class ParticipantOut(BaseModel):
     user_id: int | None = None
     email: str | None = None
     role: str
+    created_at: datetime
+
+
+class AISpecialistUpsert(BaseModel):
+    display_name: str = Field(max_length=255)
+    ai_specialty: str = Field(max_length=255)
+
+    @field_validator('display_name', 'ai_specialty')
+    @classmethod
+    def validate_non_blank(cls, value: str) -> str:
+        normalized_value = value.strip()
+        if not normalized_value:
+            raise ValueError('Value must not be blank')
+        return normalized_value
+
+
+class AISpecialistOut(BaseModel):
+    id: int
+    project_id: int
+    user_id: int | None = None
+    email: str | None = None
+    role: str
+    is_ai: bool
+    display_name: str
+    ai_specialty: str
     created_at: datetime
 
 

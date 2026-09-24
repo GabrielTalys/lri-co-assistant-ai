@@ -210,6 +210,11 @@ export default function ProjectPhasePage({ token, me }) {
   const [inviteeName, setInviteeName] = useState("");
   const [generatedInvites, setGeneratedInvites] = useState([]);
   const [isGeneratingInvite, setIsGeneratingInvite] = useState(false);
+  const [aiSpecialistName, setAiSpecialistName] = useState("");
+  const [aiSpecialty, setAiSpecialty] = useState("");
+  const [aiSpecialistConfigured, setAiSpecialistConfigured] = useState(false);
+  const [isLoadingAiSpecialist, setIsLoadingAiSpecialist] = useState(false);
+  const [isSavingAiSpecialist, setIsSavingAiSpecialist] = useState(false);
   const [assessment, setAssessment] = useState({
     valuable: 1,
     feasible: 1,
@@ -290,6 +295,30 @@ export default function ProjectPhasePage({ token, me }) {
       invite_url: item.invite_url || "",
       status: item.status || "pending",
     }));
+  }
+
+  async function fetchAiSpecialist() {
+    setIsLoadingAiSpecialist(true);
+    try {
+      const specialist = await api(
+        `/projects/${projectId}/ai-specialist`,
+        "GET",
+        null,
+        token
+      );
+      setAiSpecialistName(specialist.display_name || "");
+      setAiSpecialty(specialist.ai_specialty || "");
+      setAiSpecialistConfigured(true);
+    } catch (err) {
+      setAiSpecialistName("");
+      setAiSpecialty("");
+      setAiSpecialistConfigured(false);
+      if (Number(err?.status) !== 404) {
+        setActionMessage(`AI specialist unavailable: ${err.message}`);
+      }
+    } finally {
+      setIsLoadingAiSpecialist(false);
+    }
   }
 
   function currentServerPhase(data) {
@@ -394,6 +423,9 @@ export default function ProjectPhasePage({ token, me }) {
     if (isParticipant) {
       setInviteeName("");
       setGeneratedInvites([]);
+      setAiSpecialistName("");
+      setAiSpecialty("");
+      setAiSpecialistConfigured(false);
       return;
     }
     setInviteeName("");
@@ -401,6 +433,7 @@ export default function ProjectPhasePage({ token, me }) {
     fetchInvites()
       .then((invites) => setGeneratedInvites(invites))
       .catch(() => setGeneratedInvites([]));
+    fetchAiSpecialist();
   }, [projectId, isParticipant, routePhase]);
 
   useEffect(() => {
@@ -997,6 +1030,43 @@ export default function ProjectPhasePage({ token, me }) {
     }
   }
 
+  async function saveAiSpecialist() {
+    if (isParticipant || routePhase !== 2 || isSavingAiSpecialist) return;
+
+    const displayName = String(aiSpecialistName || "").trim();
+    const specialty = String(aiSpecialty || "").trim();
+    if (!displayName || !specialty) {
+      setActionMessage("Enter both the specialist name and specialty.");
+      return;
+    }
+
+    try {
+      setIsSavingAiSpecialist(true);
+      const specialist = await api(
+        `/projects/${projectId}/ai-specialist`,
+        "PUT",
+        {
+          display_name: displayName,
+          ai_specialty: specialty,
+        },
+        token
+      );
+      setAiSpecialistName(specialist.display_name || displayName);
+      setAiSpecialty(specialist.ai_specialty || specialty);
+      setAiSpecialistConfigured(true);
+      setTimedActionMessage(
+        aiSpecialistConfigured
+          ? "AI specialist updated."
+          : "AI specialist configured.",
+        2500
+      );
+    } catch (err) {
+      setActionMessage(err.message);
+    } finally {
+      setIsSavingAiSpecialist(false);
+    }
+  }
+
   async function copyInviteUrl(url) {
     try {
       await navigator.clipboard.writeText(url);
@@ -1512,6 +1582,69 @@ export default function ProjectPhasePage({ token, me }) {
                   Invites are locked after pivot. Continue with the same
                   participant group.
                 </p>
+              )}
+            </div>
+          )}
+
+          {routePhase === 2 && !isParticipant && (
+            <div className="field-card invite-card">
+              <div className="invite-card-header">
+                <div>
+                  <h3>AI Specialist</h3>
+                  <p className="muted">
+                    Configure an AI specialist to participate as an additional
+                    perspective in the validation.
+                  </p>
+                </div>
+                {aiSpecialistConfigured && (
+                  <span className="phase-badge">Configured</span>
+                )}
+              </div>
+              {isLoadingAiSpecialist ? (
+                <p className="hint">Loading AI specialist...</p>
+              ) : (
+                <>
+                  <div className="form-grid">
+                    <label htmlFor="ai-specialist-name">
+                      Specialist name
+                    </label>
+                    <input
+                      id="ai-specialist-name"
+                      type="text"
+                      value={aiSpecialistName}
+                      onChange={(event) =>
+                        setAiSpecialistName(event.target.value)
+                      }
+                      placeholder="Specialist name"
+                      disabled={isSavingAiSpecialist}
+                    />
+                    <label htmlFor="ai-specialist-specialty">Specialty</label>
+                    <input
+                      id="ai-specialist-specialty"
+                      type="text"
+                      value={aiSpecialty}
+                      onChange={(event) => setAiSpecialty(event.target.value)}
+                      placeholder="Specialty"
+                      disabled={isSavingAiSpecialist}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={saveAiSpecialist}
+                    disabled={
+                      isSavingAiSpecialist ||
+                      !String(aiSpecialistName || "").trim() ||
+                      !String(aiSpecialty || "").trim()
+                    }
+                  >
+                    {isSavingAiSpecialist
+                      ? "Saving..."
+                      : aiSpecialistConfigured
+                      ? "Update AI Specialist"
+                      : "Configure AI Specialist"}
+                  </button>
+                </>
               )}
             </div>
           )}

@@ -12,6 +12,8 @@ from app.db.session import get_db
 from app.models import Decision, Export, RunStatus, User
 from app.repositories import CanvasRepository, InviteRepository, ParticipantRepository, RunRepository, ScoreRepository
 from app.schemas.common import (
+    AISpecialistOut,
+    AISpecialistUpsert,
     DecisionRequest,
     ExportOut,
     ParticipantOut,
@@ -20,6 +22,7 @@ from app.schemas.common import (
     RunOut,
     RunPatch,
 )
+from app.services.ai_specialist_service import AISpecialistService
 from app.services.pdf_service import build_pdf
 from app.services.run_service import PhaseAdvanceBlockedError, RunService
 from app.services.score_service import ScoreService
@@ -61,6 +64,13 @@ def _service(db: Session) -> RunService:
     )
 
 
+def _ai_specialist_service(db: Session) -> AISpecialistService:
+    return AISpecialistService(
+        run_repo=RunRepository(db),
+        participant_repo=ParticipantRepository(db),
+    )
+
+
 def _score_service(db: Session) -> ScoreService:
     return ScoreService(
         run_repo=RunRepository(db),
@@ -92,6 +102,20 @@ def _run_out_payload(run, db: Session, invite_links_generated: bool):
         'created_at': created_at,
         'createdAt': created_at,
         'invite_links_generated': invite_links_generated,
+    }
+
+
+def _ai_specialist_out_payload(participant):
+    return {
+        'id': participant.id,
+        'project_id': participant.run_id,
+        'user_id': participant.user_id,
+        'email': participant.email,
+        'role': participant.role,
+        'is_ai': participant.is_ai,
+        'display_name': participant.display_name,
+        'ai_specialty': participant.ai_specialty,
+        'created_at': participant.created_at,
     }
 
 
@@ -201,6 +225,45 @@ def patch_run(
     db.commit()
     db.refresh(run)
     return _run_out_payload(run, db, invite_links_generated=svc.invite_repo.count_by_run(run.id) > 0)
+
+
+@router.put('/runs/{run_id}/ai-specialist', response_model=AISpecialistOut)
+@router.put('/projects/{run_id}/ai-specialist', response_model=AISpecialistOut)
+def upsert_ai_specialist(
+    run_id: int,
+    payload: AISpecialistUpsert,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    svc = _ai_specialist_service(db)
+    try:
+        specialist = svc.upsert_ai_specialist(
+            run_id=run_id,
+            owner_user_id=current_user.id,
+            display_name=payload.display_name,
+            ai_specialty=payload.ai_specialty,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    db.commit()
+    db.refresh(specialist)
+    return _ai_specialist_out_payload(specialist)
+
+
+@router.get('/runs/{run_id}/ai-specialist', response_model=AISpecialistOut)
+@router.get('/projects/{run_id}/ai-specialist', response_model=AISpecialistOut)
+def get_ai_specialist(
+    run_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    svc = _ai_specialist_service(db)
+    try:
+        specialist = svc.get_ai_specialist(run_id=run_id, owner_user_id=current_user.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _ai_specialist_out_payload(specialist)
 
 
 @router.delete('/runs/{run_id}', response_model=RunDeleteResponse)

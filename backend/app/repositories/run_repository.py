@@ -31,6 +31,9 @@ class RunRepository:
     def get(self, run_id: int) -> Run | None:
         return self.db.get(Run, run_id)
 
+    def get_for_update(self, run_id: int) -> Run | None:
+        return self.db.scalar(select(Run).where(Run.id == run_id).with_for_update())
+
     def list_by_owner(self, owner_user_id: int) -> list[Run]:
         return self.db.scalars(select(Run).where(Run.owner_user_id == owner_user_id).order_by(Run.created_at.desc())).all()
 
