@@ -107,7 +107,11 @@ class ScoreService:
 
         required_metrics = {'impact', 'feasibility', 'alignment'}
         participants = self.participant_repo.list_by_run(run_id)
-        respondents = [p for p in participants if p.role != 'facilitator']
+        respondents = [
+            p
+            for p in participants
+            if p.role != 'facilitator' and (not p.is_ai or run.ai_mode_enabled)
+        ]
         respondent_ids = {p.id for p in respondents}
 
         metrics_by_participant: dict[int, set[str]] = defaultdict(set)
