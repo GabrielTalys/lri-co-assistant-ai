@@ -14,6 +14,7 @@ from app.schemas.common import (
 )
 from app.services.canvas_service import CanvasService
 from app.services.ai_service import AISuggestionService
+from app.services.llm_client import LLMServiceError
 
 router = APIRouter(tags=['canvas'])
 
@@ -122,6 +123,8 @@ def generate_phase3_overview(
         payload = AISuggestionService(db).generate_phase3_overview(run_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except LLMServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=f'Could not generate the AI overview. {exc.user_message}') from exc
 
     db.commit()
     return payload
@@ -140,6 +143,8 @@ def generate_phase3_canvas_overview(
         payload = AISuggestionService(db).generate_phase3_canvas_overview(run_id, question_key)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except LLMServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=f'Could not generate the AI overview. {exc.user_message}') from exc
 
     db.commit()
     return payload

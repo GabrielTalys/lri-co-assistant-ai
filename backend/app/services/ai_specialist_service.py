@@ -1,8 +1,26 @@
-import json
-
 from app.repositories import CanvasRepository, ParticipantRepository, RunRepository
-from app.services.llm_client import get_llm_client
+from app.services.llm_client import LLMServiceError, get_llm_client
 from app.services.score_service import ScoreService
+
+
+_SCORE_DESCRIPTION = 'Integer score from 1 (lowest) to 7 (highest).'
+
+# Structured Outputs schema for the AI specialist assessment. Range checks (1-7)
+# are enforced again in `_parse_assessment_response` before anything is saved.
+ASSESSMENT_SCHEMA = {
+    'type': 'object',
+    'properties': {
+        'value': {'type': 'integer', 'description': _SCORE_DESCRIPTION},
+        'feasibility': {'type': 'integer', 'description': _SCORE_DESCRIPTION},
+        'applicability': {'type': 'integer', 'description': _SCORE_DESCRIPTION},
+        'comment': {
+            'type': 'string',
+            'description': 'Non-empty justification covering the three scores.',
+        },
+    },
+    'required': ['value', 'feasibility', 'applicability', 'comment'],
+    'additionalProperties': False,
+}
 
 
 class AISpecialistService:
@@ -83,31 +101,29 @@ class AISpecialistService:
             '- value: potential to generate meaningful value for industrial practice\n'
             '- feasibility: realistic investigability with typically available resources\n'
             '- applicability: realistic applicability in industry scenarios\n\n'
-            'Return only valid JSON with exactly these keys:\n'
-            '{"value": 1, "feasibility": 1, "applicability": 1, "comment": "..."}\n'
+            'Return the fields value, feasibility, applicability, and comment.\n'
             'All scores must be integers from 1 to 7. The comment must be non-empty and justify all three scores.\n'
+            'Write the comment in the same language used in the problem context. '
+            'The default language for this project is Brazilian Portuguese (pt-BR): '
+            'if the language of the context is unclear, write the comment in Brazilian Portuguese.\n'
             'Do not include markdown, extra text, Go/Pivot/Abort, or a final decision.'
         )
 
-    def _parse_assessment_response(self, response_text: str) -> dict[str, int | str]:
-        try:
-            payload = json.loads(response_text)
-        except json.JSONDecodeError as exc:
-            raise ValueError('AI specialist assessment returned invalid JSON') from exc
-
+    def _parse_assessment_response(self, payload: dict) -> dict[str, int | str]:
+        # Invalid model output is a provider failure (502), not a user input error.
         if not isinstance(payload, dict) or set(payload) != {'value', 'feasibility', 'applicability', 'comment'}:
-            raise ValueError('AI specialist assessment returned an invalid structure')
+            raise LLMServiceError('The AI returned an invalid assessment structure.')
 
         scores: dict[str, int | str] = {}
         for key in ('value', 'feasibility', 'applicability'):
             score = payload.get(key)
             if isinstance(score, bool) or not isinstance(score, int) or not 1 <= score <= 7:
-                raise ValueError('AI specialist assessment scores must be integers between 1 and 7')
+                raise LLMServiceError('The AI returned an invalid assessment: scores must be integers between 1 and 7.')
             scores[key] = score
 
         comment = payload.get('comment')
         if not isinstance(comment, str) or not comment.strip():
-            raise ValueError('AI specialist assessment requires a non-empty comment')
+            raise LLMServiceError('The AI returned an invalid assessment: the comment is empty.')
         scores['comment'] = comment.strip()
         return scores
 
@@ -145,10 +161,13 @@ class AISpecialistService:
         if not context_text:
             raise ValueError('Problem context is required for AI specialist assessment')
 
-        response_text = get_llm_client().generate(
-            self._prompt_for_assessment(run, specialist, context_text)
+        response_payload = get_llm_client().generate_json(
+            self._prompt_for_assessment(run, specialist, context_text),
+            schema_name='ai_specialist_assessment',
+            schema=ASSESSMENT_SCHEMA,
         )
-        assessment = self._parse_assessment_response(response_text)
+        # Validation happens before any score is written, so invalid output saves nothing.
+        assessment = self._parse_assessment_response(response_payload)
         comment = str(assessment['comment'])
         scores = {}
         for response_key, metric_key in metric_map.items():

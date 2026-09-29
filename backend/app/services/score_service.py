@@ -68,15 +68,25 @@ class ScoreService:
             comment=normalized_comment,
         )
 
+    def _inactive_ai_participant_ids(self, run) -> set[int]:
+        # With AI mode disabled, stored AI specialist scores are kept but not
+        # treated as part of the active assessment (same rule as get_completion).
+        if run.ai_mode_enabled:
+            return set()
+        return {p.id for p in self.participant_repo.list_by_run(run.id) if p.is_ai}
+
     def get_aggregates(self, run_id: int) -> dict:
         run = self.run_repo.get(run_id)
         if run is None:
             raise ValueError('Run not found')
 
         all_scores = self.score_repo.list_by_run(run_id, cycle=run.current_cycle)
+        inactive_ai_ids = self._inactive_ai_participant_ids(run)
 
         values_by_metric: dict[str, list[int]] = defaultdict(list)
         for score in all_scores:
+            if score.participant_id in inactive_ai_ids:
+                continue
             values_by_metric[score.metric_key].append(score.value)
 
         out = {}
@@ -126,11 +136,16 @@ class ScoreService:
         required = len(respondents) + pending_invites
         all_done = completed >= required if required > 0 else True
 
+        active_ai = [p for p in respondents if p.is_ai]
         return {
             'all_done': all_done,
             'required_respondents': required,
             'completed_respondents': completed,
             'pending_invites': pending_invites,
+            'ai_specialist_configured': any(p.is_ai for p in participants),
+            'ai_specialist_active': bool(active_ai),
+            'ai_assessment_completed': bool(active_ai)
+            and all(required_metrics.issubset(metrics_by_participant.get(p.id, set())) for p in active_ai),
         }
 
     def get_participant_scores(self, run_id: int, participant_id: int) -> dict[str, int]:
@@ -168,9 +183,12 @@ class ScoreService:
             if assigned_name:
                 invite_name_by_participant[participant_id] = assigned_name
         rows = self.score_repo.list_by_run(run_id, cycle=run.current_cycle)
+        inactive_ai_ids = self._inactive_ai_participant_ids(run)
 
         grouped: dict[int, dict] = {}
         for row in rows:
+            if row.participant_id in inactive_ai_ids:
+                continue
             comment = (row.comment or '').strip()
             if not comment:
                 continue
@@ -214,8 +232,11 @@ class ScoreService:
             if assigned_name:
                 invite_name_by_participant[participant_id] = assigned_name
 
+        inactive_ai_ids = self._inactive_ai_participant_ids(run)
         grouped: dict[int, dict] = {}
         for row in self.score_repo.list_by_run(run_id, cycle=run.current_cycle):
+            if row.participant_id in inactive_ai_ids:
+                continue
             participant = participants.get(row.participant_id)
             is_ai = bool(participant and participant.is_ai)
             display_name = (participant.display_name or '').strip() if participant else ''

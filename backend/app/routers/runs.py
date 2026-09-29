@@ -24,6 +24,7 @@ from app.schemas.common import (
     RunPatch,
 )
 from app.services.ai_specialist_service import AISpecialistService
+from app.services.llm_client import LLMServiceError
 from app.services.pdf_service import build_pdf
 from app.services.run_service import PhaseAdvanceBlockedError, RunService
 from app.services.score_service import ScoreService
@@ -281,6 +282,11 @@ def generate_ai_specialist_assessment(
         assessment = svc.generate_assessment(run_id=run_id, owner_user_id=current_user.id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except LLMServiceError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail=f'Could not generate the AI specialist assessment. {exc.user_message} No scores were saved.',
+        ) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

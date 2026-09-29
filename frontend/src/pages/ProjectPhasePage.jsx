@@ -243,6 +243,9 @@ export default function ProjectPhasePage({ token, me }) {
     required_respondents: 0,
     completed_respondents: 0,
     pending_invites: 0,
+    ai_specialist_configured: false,
+    ai_specialist_active: false,
+    ai_assessment_completed: false,
   });
   const [resultsInfo, setResultsInfo] = useState(null);
   const [commentsInfo, setCommentsInfo] = useState([]);
@@ -1164,6 +1167,9 @@ export default function ProjectPhasePage({ token, me }) {
         required_respondents: Number(scoresData.required_respondents || 0),
         completed_respondents: Number(scoresData.completed_respondents || 0),
         pending_invites: Number(scoresData.pending_invites || 0),
+        ai_specialist_configured: Boolean(scoresData.ai_specialist_configured),
+        ai_specialist_active: Boolean(scoresData.ai_specialist_active),
+        ai_assessment_completed: Boolean(scoresData.ai_assessment_completed),
       });
       setResultsInfo(criteria || null);
       setCommentsInfo(
@@ -1175,6 +1181,9 @@ export default function ProjectPhasePage({ token, me }) {
         required_respondents: 0,
         completed_respondents: 0,
         pending_invites: 0,
+        ai_specialist_configured: false,
+        ai_specialist_active: false,
+        ai_assessment_completed: false,
       });
       setCommentsInfo([]);
       setActionMessage(`Completion status unavailable: ${err.message}`);
@@ -1435,6 +1444,22 @@ export default function ProjectPhasePage({ token, me }) {
     routePhase === 4 && config.requiresAllParticipantsDone
       ? !completionInfo.all_done
       : false;
+  // The active AI specialist counts as a respondent in the backend; show it
+  // separately so a pending AI assessment does not look like a missing human.
+  const phase4AiRespondents = completionInfo.ai_specialist_active ? 1 : 0;
+  const phase4HumanRequired = Math.max(
+    0,
+    completionInfo.required_respondents - phase4AiRespondents
+  );
+  const phase4HumanCompleted = Math.max(
+    0,
+    completionInfo.completed_respondents -
+      (completionInfo.ai_specialist_active &&
+      completionInfo.ai_assessment_completed
+        ? 1
+        : 0)
+  );
+  const phase4HumansDone = phase4HumanCompleted >= phase4HumanRequired;
   const filledBoardFields = fields.filter(
     (field) => String(entries[field] || "").trim().length > 0
   );
@@ -1787,22 +1812,43 @@ export default function ProjectPhasePage({ token, me }) {
                   </p>
                   <p className="hint">
                     Status:{" "}
-                    {completionInfo.all_done
-                      ? `All participants completed (${completionInfo.completed_respondents}/${completionInfo.required_respondents})`
-                      : `Waiting for participants (${completionInfo.completed_respondents}/${completionInfo.required_respondents})`}
+                    {phase4HumansDone
+                      ? `All participants completed (${phase4HumanCompleted}/${phase4HumanRequired})`
+                      : `Waiting for participants (${phase4HumanCompleted}/${phase4HumanRequired})`}
                   {completionInfo.pending_invites > 0 &&
                       ` - ${completionInfo.pending_invites} invite(s) pending acceptance`}
                   </p>
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={generateAiSpecialistAssessment}
-                    disabled={isGeneratingAiAssessment}
-                  >
-                    {isGeneratingAiAssessment
-                      ? "Generating AI assessment..."
-                      : "Generate AI Specialist Assessment"}
-                  </button>
+                  {!project?.ai_mode_enabled ? (
+                    completionInfo.ai_specialist_configured && (
+                      <p className="hint">
+                        AI mode is disabled for this project: the AI Specialist
+                        does not take part in this assessment.
+                      </p>
+                    )
+                  ) : !completionInfo.ai_specialist_configured ? (
+                    <p className="hint">
+                      No AI Specialist configured. Configure one in Phase 2 to
+                      include an AI assessment.
+                    </p>
+                  ) : completionInfo.ai_assessment_completed ? (
+                    <p className="hint">AI Specialist assessment completed.</p>
+                  ) : (
+                    <>
+                      <p className="hint">
+                        AI Specialist configured — assessment pending.
+                      </p>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={generateAiSpecialistAssessment}
+                        disabled={isGeneratingAiAssessment}
+                      >
+                        {isGeneratingAiAssessment
+                          ? "Generating AI assessment..."
+                          : "Generate AI Specialist Assessment"}
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
             </>

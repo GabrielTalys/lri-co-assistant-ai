@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     openai_api_key: str = ''
     llm_model: str = 'gpt-4o-mini'
     llm_timeout_seconds: int = 20
+    # Local testing only: replaces OpenAI with a deterministic fake client.
+    llm_mock: bool = False
 
 
 settings = Settings()
