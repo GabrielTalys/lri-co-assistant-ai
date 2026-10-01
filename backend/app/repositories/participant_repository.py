@@ -31,3 +31,43 @@ class ParticipantRepository:
 
     def find_by_email(self, run_id: int, email: str) -> Participant | None:
         return self.db.scalar(select(Participant).where(Participant.run_id == run_id, Participant.email == email))
+
+    def find_ai_specialist(self, run_id: int) -> Participant | None:
+        return self.db.scalar(
+            select(Participant).where(Participant.run_id == run_id, Participant.is_ai.is_(True))
+        )
+
+    def create_ai_specialist(
+        self,
+        run_id: int,
+        email: str,
+        role_title: str,
+        role_description: str | None,
+    ) -> Participant:
+        participant = Participant(
+            run_id=run_id,
+            user_id=None,
+            email=email,
+            role='ai_specialist',
+            is_ai=True,
+            ai_persona_role=role_title,
+            ai_persona_description=role_description,
+        )
+        self.db.add(participant)
+        self.db.flush()
+        return participant
+
+    def update_ai_specialist(
+        self,
+        participant: Participant,
+        role_title: str,
+        role_description: str | None,
+    ) -> Participant:
+        participant.ai_persona_role = role_title
+        participant.ai_persona_description = role_description
+        self.db.flush()
+        return participant
+
+    def delete(self, participant: Participant) -> None:
+        self.db.delete(participant)
+        self.db.flush()

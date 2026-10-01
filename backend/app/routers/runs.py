@@ -399,6 +399,8 @@ def list_participants(run_id: int, db: Session = Depends(get_db), current_user: 
             'user_id': p.user_id,
             'email': p.email,
             'role': p.role,
+            'is_ai': p.is_ai,
+            'ai_persona_role': p.ai_persona_role,
             'created_at': p.created_at,
         }
         for p in participants

@@ -25,9 +25,14 @@ class Settings(BaseSettings):
     ai_poll_interval_seconds: int = 2
     ai_job_timeout_seconds: int = 30
 
+    llm_provider: str = 'gemini'
+
     openai_api_key: str = ''
     llm_model: str = 'gpt-4o-mini'
     llm_timeout_seconds: int = 20
+
+    gemini_api_key: str = ''
+    gemini_model: str = 'gemini-3.6-flash'
 
 
 settings = Settings()

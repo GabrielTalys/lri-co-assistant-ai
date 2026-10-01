@@ -24,6 +24,9 @@ services:
       INVITE_EXPIRATION_DAYS: 7
       AI_POLL_INTERVAL_SECONDS: 2
       AI_JOB_TIMEOUT_SECONDS: 30
+      LLM_PROVIDER: ${LLM_PROVIDER:-gemini}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.6-flash}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
       LLM_TIMEOUT_SECONDS: 20
@@ -46,6 +49,9 @@ services:
       AUTH_MODE: local
       JWT_SECRET: ${JWT_SECRET:-dev-secret}
       AI_JOB_TIMEOUT_SECONDS: 30
+      LLM_PROVIDER: ${LLM_PROVIDER:-gemini}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.6-flash}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
       LLM_TIMEOUT_SECONDS: 20
@@ -64,6 +70,11 @@ services:
     working_dir: /app
     environment:
       VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+      # File-watching over a Docker bind mount on Windows doesn't get native
+      # inotify events, so Vite silently keeps serving stale cached transforms
+      # of edited files. Polling makes it actually notice changes on disk.
+      CHOKIDAR_USEPOLLING: "true"
+      CHOKIDAR_INTERVAL: "300"
     volumes:
       - ./frontend:/app
       - frontend_node_modules:/app/node_modules

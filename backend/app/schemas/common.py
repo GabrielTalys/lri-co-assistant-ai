@@ -58,6 +58,8 @@ class ParticipantOut(BaseModel):
     user_id: int | None = None
     email: str | None = None
     role: str
+    is_ai: bool = False
+    ai_persona_role: str | None = None
     created_at: datetime
 
 
@@ -123,6 +125,33 @@ class Phase3OverviewResponse(BaseModel):
 class Phase3SingleOverviewResponse(BaseModel):
     question_key: str
     overview_text: str
+
+
+class AISpecialistUpsertRequest(BaseModel):
+    role_title: str
+    role_description: str | None = None
+
+
+class AISpecialistOut(BaseModel):
+    is_configured: bool = False
+    participant_id: int | None = None
+    role_title: str | None = None
+    role_description: str | None = None
+
+
+class AISpecialistDeleteResponse(BaseModel):
+    ok: bool = True
+
+
+class AIEvaluationScoreOut(BaseModel):
+    value: int
+    comment: str
+
+
+class AIEvaluationResponse(BaseModel):
+    participant_id: int
+    role_title: str | None = None
+    scores: dict[str, AIEvaluationScoreOut]
 
 
 class ScoreSubmitRequest(BaseModel):

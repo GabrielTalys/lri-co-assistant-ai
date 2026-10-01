@@ -8,7 +8,8 @@ from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
 from app.models import AISuggestionStatus
-from app.repositories import AISuggestionRepository, CanvasRepository, RunRepository
+from app.repositories import AISuggestionRepository, CanvasRepository, ParticipantRepository, RunRepository
+from app.services.canvas_context import build_canvas_context
 from app.services.llm_client import get_llm_client
 
 
@@ -21,6 +22,7 @@ class AISuggestionService:
         self.run_repo = RunRepository(db)
         self.canvas_repo = CanvasRepository(db)
         self.ai_repo = AISuggestionRepository(db)
+        self.participant_repo = ParticipantRepository(db)
         self.llm_client = get_llm_client()
 
     def _response_cycle_for_run(self, run) -> int:
@@ -49,27 +51,16 @@ class AISuggestionService:
         return run
 
     def _build_canvas_context(self, run_id: int, cycle: int):
-        questions = self.canvas_repo.list_questions()
-        responses = self.canvas_repo.list_responses_by_run(run_id, cycle=cycle)
-        responses_by_question_id = {response.question_id: response for response in responses}
+        return build_canvas_context(self.canvas_repo, run_id, cycle)
 
-        filled_items = []
-        empty_questions = []
-
-        for question in questions:
-            response = responses_by_question_id.get(question.id)
-            content = (response.content or '').strip() if response else ''
-            if content:
-                filled_items.append({'question': question, 'content': content})
-            else:
-                empty_questions.append(question)
-
-        context_lines = [
-            f"{item['question'].title} ({item['question'].key}): {item['content']}"
-            for item in filled_items
-        ]
-        context_text = '\n'.join(context_lines).strip()
-        return filled_items, empty_questions, context_text
+    def _get_ai_persona(self, run_id: int) -> dict | None:
+        specialist = self.participant_repo.find_ai_specialist(run_id)
+        if specialist is None:
+            return None
+        return {
+            'role_title': specialist.ai_persona_role,
+            'role_description': specialist.ai_persona_description,
+        }
 
     def _prompt_for_question(self, question, context_text: str) -> str:
         prompt_template = question.prompt_template or f'Provide content for {question.title}.'
@@ -105,8 +96,28 @@ class AISuggestionService:
             f'\n{field_specific_instruction}'
         )
 
-    def _prompt_for_phase3_overview(self, question, question_content: str, context_text: str) -> str:
+    def _prompt_for_phase3_overview(
+        self,
+        question,
+        question_content: str,
+        context_text: str,
+        persona: dict | None = None,
+    ) -> str:
+        persona_block = ''
+        if persona and persona.get('role_title'):
+            persona_block = (
+                f'Adopt the professional perspective of an external specialist in the following role: '
+                f'{persona["role_title"]}.\n'
+            )
+            if persona.get('role_description'):
+                persona_block += f'Additional context about this role: {persona["role_description"]}\n'
+            persona_block += (
+                'Write the analysis strictly through this specialist lens, emphasizing what this role '
+                'would specifically notice, value, or flag as risk.\n\n'
+            )
+
         return (
+            f'{persona_block}'
             'You are assisting a Lean Research Inception workshop facilitator.\n'
             'Review one fully completed phase 3 canvas in the context of the whole formulated problem.\n'
             f'Target canvas: {question.title} ({question.key}).\n'
@@ -309,6 +320,7 @@ class AISuggestionService:
         run = self._get_run_for_phase3_overview(run_id)
         cycle = self._response_cycle_for_run(run)
         filled_items, empty_questions, context_text = self._build_canvas_context(run_id, cycle)
+        persona = self._get_ai_persona(run_id)
 
         if empty_questions:
             raise ValueError('Fill every canvas field before requesting the overview')
@@ -320,6 +332,7 @@ class AISuggestionService:
                 question,
                 item['content'],
                 context_text,
+                persona=persona,
             )
             overview_text = self.llm_client.generate(prompt).strip()
             if not overview_text:
@@ -348,10 +361,12 @@ class AISuggestionService:
             raise ValueError('Unknown canvas question key')
 
         question = target_item['question']
+        persona = self._get_ai_persona(run_id)
         prompt = self._prompt_for_phase3_overview(
             question,
             target_item['content'],
             context_text,
+            persona=persona,
         )
         overview_text = self.llm_client.generate(prompt).strip()
         if not overview_text:

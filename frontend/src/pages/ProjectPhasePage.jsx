@@ -210,6 +210,18 @@ export default function ProjectPhasePage({ token, me }) {
   const [inviteeName, setInviteeName] = useState("");
   const [generatedInvites, setGeneratedInvites] = useState([]);
   const [isGeneratingInvite, setIsGeneratingInvite] = useState(false);
+
+  const [aiSpecialist, setAiSpecialist] = useState(null);
+  const [aiSpecialistRoleTitle, setAiSpecialistRoleTitle] = useState("");
+  const [aiSpecialistRoleDescription, setAiSpecialistRoleDescription] =
+    useState("");
+  const [isSavingAiSpecialist, setIsSavingAiSpecialist] = useState(false);
+  const [isRemovingAiSpecialist, setIsRemovingAiSpecialist] = useState(false);
+  const [aiEvaluation, setAiEvaluation] = useState(null);
+  const [isGeneratingAiEvaluation, setIsGeneratingAiEvaluation] =
+    useState(false);
+  const [isResettingAiEvaluation, setIsResettingAiEvaluation] =
+    useState(false);
   const [assessment, setAssessment] = useState({
     valuable: 1,
     feasible: 1,
@@ -296,6 +308,24 @@ export default function ProjectPhasePage({ token, me }) {
     return Number(data?.current_phase || 1);
   }
 
+  async function fetchAiSpecialist() {
+    try {
+      const data = isParticipant
+        ? await api(
+            `/projects/${projectId}/ai-specialist?participant_id=${participantId}`,
+            "GET"
+          )
+        : await api(`/projects/${projectId}/ai-specialist`, "GET", null, token);
+      setAiSpecialist(data?.is_configured ? data : null);
+      if (data?.is_configured) {
+        setAiSpecialistRoleTitle(data.role_title || "");
+        setAiSpecialistRoleDescription(data.role_description || "");
+      }
+    } catch {
+      setAiSpecialist(null);
+    }
+  }
+
   async function fetchCanvas() {
     const data = await api(
       `/projects/${projectId}/canvas${participantQuery}`,
@@ -348,6 +378,7 @@ export default function ProjectPhasePage({ token, me }) {
       }
 
       await fetchCanvas();
+      await fetchAiSpecialist();
 
       if (isParticipant && routePhase === 4 && participantId) {
         await hydrateParticipantAssessment(participantId);
@@ -1053,9 +1084,11 @@ export default function ProjectPhasePage({ token, me }) {
       const data = await loadScores();
       setResultsInfo(data.criteria || null);
       setCommentsInfo(Array.isArray(data.comments) ? data.comments : []);
+      setAiEvaluation(data.ai_evaluation || null);
     } catch {
       setResultsInfo(null);
       setCommentsInfo([]);
+      setAiEvaluation(null);
     }
   }
 
@@ -1080,6 +1113,7 @@ export default function ProjectPhasePage({ token, me }) {
       setCommentsInfo(
         Array.isArray(scoresData.comments) ? scoresData.comments : []
       );
+      setAiEvaluation(scoresData.ai_evaluation || null);
     } catch (err) {
       setCompletionInfo({
         all_done: false,
@@ -1089,6 +1123,79 @@ export default function ProjectPhasePage({ token, me }) {
       });
       setCommentsInfo([]);
       setActionMessage(`Completion status unavailable: ${err.message}`);
+    }
+  }
+
+  async function saveAiSpecialist() {
+    const normalizedTitle = String(aiSpecialistRoleTitle || "").trim();
+    if (!normalizedTitle) {
+      setActionMessage("AI specialist role is required.");
+      return;
+    }
+    try {
+      setIsSavingAiSpecialist(true);
+      const data = await api(
+        `/projects/${projectId}/ai-specialist`,
+        "PUT",
+        {
+          role_title: normalizedTitle,
+          role_description: aiSpecialistRoleDescription || null,
+        },
+        token
+      );
+      setAiSpecialist(data?.is_configured ? data : null);
+      setTimedActionMessage("AI specialist configured.", 2500);
+    } catch (err) {
+      setActionMessage(err.message);
+    } finally {
+      setIsSavingAiSpecialist(false);
+    }
+  }
+
+  async function removeAiSpecialist() {
+    try {
+      setIsRemovingAiSpecialist(true);
+      await api(`/projects/${projectId}/ai-specialist`, "DELETE", null, token);
+      setAiSpecialist(null);
+      setAiSpecialistRoleTitle("");
+      setAiSpecialistRoleDescription("");
+      setTimedActionMessage("AI specialist removed.", 2500);
+    } catch (err) {
+      setActionMessage(err.message);
+    } finally {
+      setIsRemovingAiSpecialist(false);
+    }
+  }
+
+  async function generateAiEvaluation() {
+    try {
+      setIsGeneratingAiEvaluation(true);
+      await api(`/projects/${projectId}/ai-specialist/evaluate`, "POST", {}, token);
+      await refreshCompletion();
+      setTimedActionMessage("AI evaluation generated.", 2500);
+    } catch (err) {
+      setActionMessage(err.message);
+    } finally {
+      setIsGeneratingAiEvaluation(false);
+    }
+  }
+
+  async function resetAiEvaluation() {
+    if (!aiEvaluation?.participant_id) return;
+    try {
+      setIsResettingAiEvaluation(true);
+      await api(
+        `/projects/${projectId}/scores/${aiEvaluation.participant_id}`,
+        "DELETE",
+        null,
+        token
+      );
+      await refreshCompletion();
+      setTimedActionMessage("AI evaluation reset.", 2500);
+    } catch (err) {
+      setActionMessage(err.message);
+    } finally {
+      setIsResettingAiEvaluation(false);
     }
   }
 
@@ -1413,6 +1520,12 @@ export default function ProjectPhasePage({ token, me }) {
                           : "Get overview"}
                       </button>
                     )}
+                    {showPhase3OverviewButton && aiSpecialist && (
+                      <p className="hint">
+                        Overview will reflect the perspective of:{" "}
+                        {aiSpecialist.role_title}
+                      </p>
+                    )}
                   </div>
                 )}
               </div>
@@ -1511,6 +1624,77 @@ export default function ProjectPhasePage({ token, me }) {
                 <p className="hint">
                   Invites are locked after pivot. Continue with the same
                   participant group.
+                </p>
+              )}
+            </div>
+          )}
+
+          {routePhase === 2 && !isParticipant && (
+            <div className="field-card ai-specialist-card">
+              <div className="invite-card-header">
+                <h3>AI Specialist (optional)</h3>
+                <p className="muted">
+                  If no one in this workshop covers a needed expertise, have
+                  the AI join as that specialist. It will review the
+                  reformulated problem and evaluate it from that
+                  perspective, alongside the human participants.
+                </p>
+              </div>
+              <div className="form-grid">
+                <label htmlFor="ai-specialist-role">Specialist role</label>
+                <input
+                  id="ai-specialist-role"
+                  type="text"
+                  value={aiSpecialistRoleTitle}
+                  onChange={(event) =>
+                    setAiSpecialistRoleTitle(event.target.value)
+                  }
+                  placeholder="e.g. Sales specialist"
+                  disabled={isSavingAiSpecialist}
+                />
+                <label htmlFor="ai-specialist-context">
+                  Extra context (optional)
+                </label>
+                <textarea
+                  id="ai-specialist-context"
+                  value={aiSpecialistRoleDescription}
+                  onChange={(event) =>
+                    setAiSpecialistRoleDescription(event.target.value)
+                  }
+                  placeholder="What should this specialist focus on?"
+                  disabled={isSavingAiSpecialist}
+                />
+              </div>
+              <div className="row gap-8">
+                <button
+                  className="btn btn-secondary"
+                  type="button"
+                  onClick={saveAiSpecialist}
+                  disabled={
+                    isSavingAiSpecialist ||
+                    !String(aiSpecialistRoleTitle || "").trim()
+                  }
+                >
+                  {isSavingAiSpecialist
+                    ? "Saving..."
+                    : aiSpecialist
+                    ? "Update AI specialist"
+                    : "Configure AI specialist"}
+                </button>
+                {aiSpecialist && (
+                  <button
+                    className="btn btn-tertiary"
+                    type="button"
+                    onClick={removeAiSpecialist}
+                    disabled={isRemovingAiSpecialist}
+                  >
+                    {isRemovingAiSpecialist ? "Removing..." : "Remove"}
+                  </button>
+                )}
+              </div>
+              {aiSpecialist && (
+                <p className="hint">
+                  Configured as: {aiSpecialist.role_title}
                 </p>
               )}
             </div>
@@ -1621,6 +1805,42 @@ export default function ProjectPhasePage({ token, me }) {
                     {completionInfo.pending_invites > 0 &&
                       ` - ${completionInfo.pending_invites} invite(s) pending acceptance`}
                   </p>
+                </div>
+              )}
+              {!isParticipant && aiSpecialist && (
+                <div className="field-card">
+                  <h3>AI Specialist: {aiSpecialist.role_title}</h3>
+                  {aiEvaluation?.is_complete ? (
+                    <>
+                      <p className="hint">AI evaluation generated.</p>
+                      <button
+                        className="btn btn-secondary"
+                        type="button"
+                        onClick={resetAiEvaluation}
+                        disabled={isResettingAiEvaluation}
+                      >
+                        {isResettingAiEvaluation
+                          ? "Resetting..."
+                          : "Reset AI evaluation"}
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <p className="muted">
+                        The AI specialist has not evaluated this problem yet.
+                      </p>
+                      <button
+                        className="btn btn-primary"
+                        type="button"
+                        onClick={generateAiEvaluation}
+                        disabled={isGeneratingAiEvaluation}
+                      >
+                        {isGeneratingAiEvaluation
+                          ? "Generating..."
+                          : "Generate AI evaluation"}
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
             </>
@@ -1752,6 +1972,35 @@ export default function ProjectPhasePage({ token, me }) {
                   <p className="muted">No comments submitted yet.</p>
                 )}
               </div>
+              {aiEvaluation?.is_complete && (
+                <div className="decision-section">
+                  <div className="decision-divider" />
+                  <h2>AI Specialist Perspective</h2>
+                  <div className="comments-grid">
+                    <div className="field-card comment-card">
+                      <h3>{aiEvaluation.role_title}</h3>
+                      <div className="comment-list">
+                        {phase5ResultOrder.map(({ metricKey, label }) => {
+                          const entry = aiEvaluation.scores?.[metricKey];
+                          if (!entry) return null;
+                          return (
+                            <p key={metricKey}>
+                              <strong>
+                                {label}: {entry.value}/7
+                              </strong>{" "}
+                              {entry.comment}
+                            </p>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                  <p className="hint">
+                    Shown for comparison only — not included in the
+                    consolidated results above or in the final decision.
+                  </p>
+                </div>
+              )}
               {!isParticipant && (
                 <div className="decision-section">
                   <div className="decision-divider" />
