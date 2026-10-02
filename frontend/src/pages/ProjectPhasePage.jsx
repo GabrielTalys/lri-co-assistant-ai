@@ -97,6 +97,18 @@ const decisionAriaLabels = {
 };
 const canvasAutoSavePollingMs = 5000;
 
+// Mirrors the backend column limits for AI specialist role and context.
+const aiSpecialistRoleMaxLength = 120;
+const aiSpecialistContextMaxLength = 500;
+const emptyAiSpecialistDraft = { role_title: "", role_description: "" };
+
+function aiSpecialistToDraft(specialist) {
+  return {
+    role_title: specialist?.role_title || "",
+    role_description: specialist?.role_description || "",
+  };
+}
+
 const phase3CanvasTitles = {
   problem: "For the practical problem (what/how/why)",
   stakeholders: "Involved in the context (where/when)",
@@ -198,9 +210,10 @@ export default function ProjectPhasePage({ token, me }) {
     useState(false);
   const [isGeneratingPhase3Overview, setIsGeneratingPhase3Overview] =
     useState(false);
+  // { [field]: [{ id, label, text, perspectives }] } — the overview of each field,
+  // plus the individual AI specialist reviews it consolidates (panel mode).
   const [phase3OverviewsByField, setPhase3OverviewsByField] = useState({});
-  const [phase3OverviewPendingByField, setPhase3OverviewPendingByField] =
-    useState({});
+  const [isPhase3OverviewPending, setIsPhase3OverviewPending] = useState(false);
 
   const [entries, setEntries] = useState({});
   const [suggestions, setSuggestions] = useState({});
@@ -210,6 +223,22 @@ export default function ProjectPhasePage({ token, me }) {
   const [inviteeName, setInviteeName] = useState("");
   const [generatedInvites, setGeneratedInvites] = useState([]);
   const [isGeneratingInvite, setIsGeneratingInvite] = useState(false);
+
+  const [aiSpecialists, setAiSpecialists] = useState([]);
+  const [maxAiSpecialists, setMaxAiSpecialists] = useState(3);
+  // Unsaved edits of each configured specialist, keyed by participant id.
+  const [aiSpecialistDrafts, setAiSpecialistDrafts] = useState({});
+  const [newAiSpecialist, setNewAiSpecialist] = useState(
+    emptyAiSpecialistDraft
+  );
+  // Participant id being saved, or "new" while adding one.
+  const [savingAiSpecialistId, setSavingAiSpecialistId] = useState(null);
+  const [removingAiSpecialistId, setRemovingAiSpecialistId] = useState(null);
+  const [aiEvaluations, setAiEvaluations] = useState([]);
+  const [generatingAiEvaluationIds, setGeneratingAiEvaluationIds] = useState(
+    []
+  );
+  const [resettingAiEvaluationId, setResettingAiEvaluationId] = useState(null);
   const [assessment, setAssessment] = useState({
     valuable: 1,
     feasible: 1,
@@ -254,6 +283,16 @@ export default function ProjectPhasePage({ token, me }) {
     ? `?participant_id=${participantId}`
     : "";
   const currentPhaseNumber = enumToPhaseNumber(project?.current_phase);
+  // The facilitator can reopen completed phases read-only; guests always follow
+  // the project's current phase.
+  const serverPhaseNumber = Number(project?.current_phase || 0);
+  const isReviewMode =
+    !isParticipant && serverPhaseNumber > 0 && routePhase < serverPhaseNumber;
+
+  function shouldFollowServerPhase(serverPhase) {
+    if (!Number.isInteger(routePhase) || routePhase < 1) return true;
+    return isParticipant ? serverPhase !== routePhase : routePhase > serverPhase;
+  }
 
   function participantRoute(phase) {
     const suffix = isParticipant
@@ -296,6 +335,28 @@ export default function ProjectPhasePage({ token, me }) {
     return Number(data?.current_phase || 1);
   }
 
+  async function fetchAiSpecialists() {
+    try {
+      const data = isParticipant
+        ? await api(
+            `/projects/${projectId}/ai-specialists?participant_id=${participantId}`,
+            "GET"
+          )
+        : await api(`/projects/${projectId}/ai-specialists`, "GET", null, token);
+      const items = Array.isArray(data?.items) ? data.items : [];
+      setAiSpecialists(items);
+      setMaxAiSpecialists(Number(data?.max_specialists) || 3);
+      setAiSpecialistDrafts(
+        Object.fromEntries(
+          items.map((item) => [item.participant_id, aiSpecialistToDraft(item)])
+        )
+      );
+    } catch {
+      setAiSpecialists([]);
+      setAiSpecialistDrafts({});
+    }
+  }
+
   async function fetchCanvas() {
     const data = await api(
       `/projects/${projectId}/canvas${participantQuery}`,
@@ -325,7 +386,7 @@ export default function ProjectPhasePage({ token, me }) {
     try {
       const projectData = await fetchProjectState();
       const serverPhase = currentServerPhase(projectData);
-      if (serverPhase !== routePhase) {
+      if (shouldFollowServerPhase(serverPhase)) {
         navigate(participantRoute(serverPhase), { replace: true });
         return;
       }
@@ -348,6 +409,7 @@ export default function ProjectPhasePage({ token, me }) {
       }
 
       await fetchCanvas();
+      await fetchAiSpecialists();
 
       if (isParticipant && routePhase === 4 && participantId) {
         await hydrateParticipantAssessment(participantId);
@@ -377,7 +439,7 @@ export default function ProjectPhasePage({ token, me }) {
   useEffect(() => {
     if (!project) return;
     const serverPhase = Number(project.current_phase || 1);
-    if (serverPhase !== routePhase) {
+    if (shouldFollowServerPhase(serverPhase)) {
       navigate(participantRoute(serverPhase), { replace: true });
     }
     if (
@@ -409,7 +471,7 @@ export default function ProjectPhasePage({ token, me }) {
       try {
         const latest = await fetchProjectState();
         const latestPhase = currentServerPhase(latest);
-        if (latestPhase !== routePhase) {
+        if (shouldFollowServerPhase(latestPhase)) {
           setProject((prev) => ({ ...prev, ...latest }));
           navigate(participantRoute(latestPhase), { replace: true });
         } else {
@@ -452,7 +514,7 @@ export default function ProjectPhasePage({ token, me }) {
   useEffect(() => {
     phase3OverviewGenerationRef.current += 1;
     setPhase3OverviewsByField({});
-    setPhase3OverviewPendingByField({});
+    setIsPhase3OverviewPending(false);
     setIsGeneratingPhase3Overview(false);
   }, [projectId, project?.current_cycle, routePhase]);
 
@@ -533,7 +595,7 @@ export default function ProjectPhasePage({ token, me }) {
     if (routePhase === 3) {
       phase3OverviewGenerationRef.current += 1;
       setPhase3OverviewsByField({});
-      setPhase3OverviewPendingByField({});
+      setIsPhase3OverviewPending(false);
     }
 
     if (!config.collaborativeAutoSave || !actorParticipantId) return;
@@ -777,66 +839,77 @@ export default function ProjectPhasePage({ token, me }) {
     const persisted = await persistPhaseEntriesBeforeAdvance();
     if (!persisted) return;
 
+    // A single request: with 2+ AI specialists the backend has each one review
+    // the canvas independently and a moderator consolidates them into one
+    // overview per field (their individual reviews come back as `perspectives`).
     setIsGeneratingPhase3Overview(true);
     const generationId = phase3OverviewGenerationRef.current + 1;
     phase3OverviewGenerationRef.current = generationId;
     setPhase3OverviewsByField({});
-    setPhase3OverviewPendingByField(
-      Object.fromEntries(fields.map((field) => [field, true]))
-    );
+    setIsPhase3OverviewPending(true);
 
     try {
-      const failures = [];
-      const tasks = fields.map((field) =>
-        api(
-          `/projects/${projectId}/canvas/${encodeURIComponent(field)}/overview`,
-          "POST",
-          {},
-          token
-        )
-          .then((data) => {
-            if (phase3OverviewGenerationRef.current !== generationId) return;
-            const overviewText = String(data?.overview_text || "").trim();
-            if (overviewText) {
-              setPhase3OverviewsByField((prev) => ({
-                ...prev,
-                [field]: overviewText,
-              }));
-            }
-          })
-          .catch((err) => {
-            failures.push({ field, message: err.message });
-          })
-          .finally(() => {
-            if (phase3OverviewGenerationRef.current !== generationId) return;
-            setPhase3OverviewPendingByField((prev) => ({
-              ...prev,
-              [field]: false,
-            }));
-          })
+      const data = await api(
+        `/projects/${projectId}/canvas/overview`,
+        "POST",
+        {},
+        token
       );
-
-      await Promise.allSettled(tasks);
       if (phase3OverviewGenerationRef.current !== generationId) return;
 
-      const generatedCount = fields.length - failures.length;
-      if (generatedCount > 0 && failures.length === 0) {
-        setTimedActionMessage(
-          `${generatedCount} overview${generatedCount === 1 ? "" : "s"} ready.`,
-          3000
-        );
-      } else if (generatedCount > 0) {
+      const overviews = data?.overviews || {};
+      const perspectives = Array.isArray(data?.perspectives)
+        ? data.perspectives
+        : [];
+      const label =
+        data?.mode === "panel"
+          ? `AI specialist panel: ${perspectives
+              .map((perspective) => perspective.role_title)
+              .join(", ")}`
+          : data?.role_title || "";
+      setPhase3OverviewsByField(
+        Object.fromEntries(
+          fields
+            .filter((field) => String(overviews[field] || "").trim())
+            .map((field) => [
+              field,
+              [
+                {
+                  id: data?.mode || "overview",
+                  label,
+                  text: overviews[field],
+                  perspectives: perspectives
+                    .filter((perspective) => perspective.overviews?.[field])
+                    .map((perspective) => ({
+                      id: perspective.specialist_id,
+                      label: perspective.role_title,
+                      text: perspective.overviews[field],
+                    })),
+                },
+              ],
+            ])
+        )
+      );
+
+      const failed = Array.isArray(data?.failed_specialists)
+        ? data.failed_specialists
+        : [];
+      if (failed.length > 0) {
         setActionMessage(
-          `${generatedCount} overview${
-            generatedCount === 1 ? "" : "s"
-          } ready. ${failures.length} failed.`
+          `Overview ready, but these AI specialists could not respond: ${failed.join(
+            ", "
+          )}.`
         );
       } else {
-        setTimedActionMessage("No overviews were generated.", 2500);
+        setTimedActionMessage("Overview ready.", 3000);
       }
     } catch (err) {
+      if (phase3OverviewGenerationRef.current !== generationId) return;
       setActionMessage(err.message);
     } finally {
+      if (phase3OverviewGenerationRef.current === generationId) {
+        setIsPhase3OverviewPending(false);
+      }
       setIsGeneratingPhase3Overview(false);
     }
   }
@@ -850,16 +923,19 @@ export default function ProjectPhasePage({ token, me }) {
     setSuggestions((prev) => ({ ...prev, [field]: null }));
   }
 
-  function dismissPhase3Overview(field) {
+  function dismissPhase3Overview(field, overviewId) {
     setPhase3OverviewsByField((prev) => {
+      const remaining = (prev[field] || []).filter(
+        (overview) => overview.id !== overviewId
+      );
       const next = { ...prev };
-      delete next[field];
+      if (remaining.length > 0) {
+        next[field] = remaining;
+      } else {
+        delete next[field];
+      }
       return next;
     });
-    setPhase3OverviewPendingByField((prev) => ({
-      ...prev,
-      [field]: false,
-    }));
   }
 
   async function persistCanvasSnapshotByPolling() {
@@ -895,7 +971,8 @@ export default function ProjectPhasePage({ token, me }) {
   }
 
   useEffect(() => {
-    if (!project || isParticipant || !actorParticipantId) return;
+    // Read-only review of a past phase must never write the shared canvas.
+    if (!project || isParticipant || isReviewMode || !actorParticipantId) return;
 
     const interval = setInterval(() => {
       void persistCanvasSnapshotByPolling();
@@ -906,6 +983,7 @@ export default function ProjectPhasePage({ token, me }) {
     project?.id,
     project?.current_cycle,
     isParticipant,
+    isReviewMode,
     actorParticipantId,
     routePhase,
     token,
@@ -1053,9 +1131,13 @@ export default function ProjectPhasePage({ token, me }) {
       const data = await loadScores();
       setResultsInfo(data.criteria || null);
       setCommentsInfo(Array.isArray(data.comments) ? data.comments : []);
+      setAiEvaluations(
+        Array.isArray(data.ai_evaluations) ? data.ai_evaluations : []
+      );
     } catch {
       setResultsInfo(null);
       setCommentsInfo([]);
+      setAiEvaluations([]);
     }
   }
 
@@ -1080,6 +1162,11 @@ export default function ProjectPhasePage({ token, me }) {
       setCommentsInfo(
         Array.isArray(scoresData.comments) ? scoresData.comments : []
       );
+      setAiEvaluations(
+        Array.isArray(scoresData.ai_evaluations)
+          ? scoresData.ai_evaluations
+          : []
+      );
     } catch (err) {
       setCompletionInfo({
         all_done: false,
@@ -1089,6 +1176,179 @@ export default function ProjectPhasePage({ token, me }) {
       });
       setCommentsInfo([]);
       setActionMessage(`Completion status unavailable: ${err.message}`);
+    }
+  }
+
+  function changeAiSpecialistDraft(specialistId, key, value) {
+    setAiSpecialistDrafts((prev) => ({
+      ...prev,
+      [specialistId]: { ...(prev[specialistId] || {}), [key]: value },
+    }));
+  }
+
+  function isAiSpecialistDraftDirty(specialist) {
+    const draft = aiSpecialistDrafts[specialist.participant_id];
+    if (!draft) return false;
+    const saved = aiSpecialistToDraft(specialist);
+    return (
+      draft.role_title.trim() !== saved.role_title.trim() ||
+      draft.role_description.trim() !== saved.role_description.trim()
+    );
+  }
+
+  async function addAiSpecialist() {
+    const roleTitle = String(newAiSpecialist.role_title || "").trim();
+    if (!roleTitle) {
+      setActionMessage("AI specialist role is required.");
+      return;
+    }
+    try {
+      setSavingAiSpecialistId("new");
+      const created = await api(
+        `/projects/${projectId}/ai-specialists`,
+        "POST",
+        {
+          role_title: roleTitle,
+          role_description: newAiSpecialist.role_description || null,
+        },
+        token
+      );
+      setAiSpecialists((prev) => [...prev, created]);
+      setAiSpecialistDrafts((prev) => ({
+        ...prev,
+        [created.participant_id]: aiSpecialistToDraft(created),
+      }));
+      setNewAiSpecialist(emptyAiSpecialistDraft);
+      setTimedActionMessage("AI specialist added.", 2500);
+    } catch (err) {
+      setActionMessage(err.message);
+    } finally {
+      setSavingAiSpecialistId(null);
+    }
+  }
+
+  async function updateAiSpecialist(specialistId) {
+    const draft = aiSpecialistDrafts[specialistId] || emptyAiSpecialistDraft;
+    const roleTitle = String(draft.role_title || "").trim();
+    if (!roleTitle) {
+      setActionMessage("AI specialist role is required.");
+      return;
+    }
+    try {
+      setSavingAiSpecialistId(specialistId);
+      const updated = await api(
+        `/projects/${projectId}/ai-specialists/${specialistId}`,
+        "PUT",
+        {
+          role_title: roleTitle,
+          role_description: draft.role_description || null,
+        },
+        token
+      );
+      setAiSpecialists((prev) =>
+        prev.map((item) =>
+          item.participant_id === specialistId ? updated : item
+        )
+      );
+      setAiSpecialistDrafts((prev) => ({
+        ...prev,
+        [specialistId]: aiSpecialistToDraft(updated),
+      }));
+      setTimedActionMessage("AI specialist updated.", 2500);
+    } catch (err) {
+      setActionMessage(err.message);
+    } finally {
+      setSavingAiSpecialistId(null);
+    }
+  }
+
+  async function removeAiSpecialist(specialistId) {
+    try {
+      setRemovingAiSpecialistId(specialistId);
+      await api(
+        `/projects/${projectId}/ai-specialists/${specialistId}`,
+        "DELETE",
+        null,
+        token
+      );
+      setAiSpecialists((prev) =>
+        prev.filter((item) => item.participant_id !== specialistId)
+      );
+      setAiSpecialistDrafts((prev) => {
+        const next = { ...prev };
+        delete next[specialistId];
+        return next;
+      });
+      setTimedActionMessage("AI specialist removed.", 2500);
+    } catch (err) {
+      setActionMessage(err.message);
+    } finally {
+      setRemovingAiSpecialistId(null);
+    }
+  }
+
+  async function requestAiEvaluation(specialistId) {
+    setGeneratingAiEvaluationIds((prev) => [...prev, specialistId]);
+    try {
+      await api(
+        `/projects/${projectId}/ai-specialists/${specialistId}/evaluate`,
+        "POST",
+        {},
+        token
+      );
+    } finally {
+      setGeneratingAiEvaluationIds((prev) =>
+        prev.filter((id) => id !== specialistId)
+      );
+    }
+  }
+
+  async function generateAiEvaluations(specialistIds) {
+    if (specialistIds.length === 0) return;
+    // Each specialist evaluates independently, so the requests run in parallel.
+    const results = await Promise.allSettled(
+      specialistIds.map((specialistId) => requestAiEvaluation(specialistId))
+    );
+    await refreshCompletion();
+
+    const failures = results
+      .map((result, index) => ({ result, specialistId: specialistIds[index] }))
+      .filter(({ result }) => result.status === "rejected")
+      .map(({ result, specialistId }) => {
+        const specialist = aiSpecialists.find(
+          (item) => item.participant_id === specialistId
+        );
+        return `${specialist?.role_title || "AI specialist"}: ${
+          result.reason?.message || "failed"
+        }`;
+      });
+    if (failures.length === 0) {
+      setTimedActionMessage(
+        specialistIds.length === 1
+          ? "AI evaluation generated."
+          : `${specialistIds.length} AI evaluations generated.`,
+        2500
+      );
+    } else {
+      setActionMessage(`AI evaluation failed - ${failures.join(" | ")}`);
+    }
+  }
+
+  async function resetAiEvaluation(specialistId) {
+    try {
+      setResettingAiEvaluationId(specialistId);
+      await api(
+        `/projects/${projectId}/scores/${specialistId}`,
+        "DELETE",
+        null,
+        token
+      );
+      await refreshCompletion();
+      setTimedActionMessage("AI evaluation reset.", 2500);
+    } catch (err) {
+      setActionMessage(err.message);
+    } finally {
+      setResettingAiEvaluationId(null);
     }
   }
 
@@ -1313,17 +1573,19 @@ export default function ProjectPhasePage({ token, me }) {
   if (!project) return null;
 
   const phaseTitle = phaseLabels[routePhase] || "Phase";
-  const canAdvance = !isParticipant && config.canAdvance;
+  // Facilitator actions that change the project: hidden while reviewing a past phase.
+  const canActOnPhase = !isParticipant && !isReviewMode;
+  const canAdvance = canActOnPhase && config.canAdvance;
   const isFollowUpCycle = Number(project?.current_cycle || 1) > 1;
   const canGenerateInvite =
-    config.showInviteLink && !isParticipant && !isFollowUpCycle;
+    config.showInviteLink && canActOnPhase && !isFollowUpCycle;
   const missingInviteForPhase3 =
     routePhase === 2 &&
-    !isParticipant &&
+    canActOnPhase &&
     !isFollowUpCycle &&
     !project?.invite_links_generated;
   const phase4Blocked =
-    routePhase === 4 && config.requiresAllParticipantsDone
+    routePhase === 4 && canActOnPhase && config.requiresAllParticipantsDone
       ? !completionInfo.all_done
       : false;
   const filledBoardFields = fields.filter(
@@ -1333,7 +1595,7 @@ export default function ProjectPhasePage({ token, me }) {
     (field) => String(entries[field] || "").trim().length === 0
   );
   const canvasAdvanceBlocked =
-    !isParticipant && routePhase <= 3 && emptyBoardFields.length > 0;
+    canActOnPhase && routePhase <= 3 && emptyBoardFields.length > 0;
   const advanceDisabled =
     missingInviteForPhase3 || phase4Blocked || canvasAdvanceBlocked;
   const assessmentSubmitted =
@@ -1347,17 +1609,32 @@ export default function ProjectPhasePage({ token, me }) {
   ).toUpperCase();
   const hasFinalDecision =
     finalDecisionKey === "GO" || finalDecisionKey === "ABORT";
-  const canEditCanvas = !isParticipant;
+  const canEditCanvas = canActOnPhase;
   const showRecommendationButton =
-    routePhase === 1 && !isParticipant && Boolean(project?.ai_mode_enabled);
+    routePhase === 1 && canActOnPhase && Boolean(project?.ai_mode_enabled);
   const showPhase3OverviewButton =
-    routePhase === 3 && !isParticipant && Boolean(project?.ai_mode_enabled);
+    routePhase === 3 && canActOnPhase && Boolean(project?.ai_mode_enabled);
+  const completedAiEvaluations = aiEvaluations.filter(
+    (evaluation) => evaluation.is_complete
+  );
+  const pendingAiEvaluationIds = aiSpecialists
+    .map((specialist) => specialist.participant_id)
+    .filter(
+      (specialistId) =>
+        !generatingAiEvaluationIds.includes(specialistId) &&
+        !completedAiEvaluations.some(
+          (evaluation) => evaluation.participant_id === specialistId
+        )
+    );
 
   return (
     <div className="project-layout">
       <PhaseStepper
         currentPhaseNumber={Number(currentPhaseNumber || 1)}
         activePhaseNumber={routePhase}
+        onSelectPhase={
+          isParticipant ? undefined : (phase) => navigate(participantRoute(phase))
+        }
       />
 
       <section className="project-main">
@@ -1369,6 +1646,23 @@ export default function ProjectPhasePage({ token, me }) {
             </div>
             <div className="phase-chip">Phase {routePhase}</div>
           </div>
+          {isReviewMode && (
+            <div className="review-banner" role="status">
+              <span>
+                Viewing Phase {routePhase} (read-only). The project is in Phase{" "}
+                {serverPhaseNumber}.
+                {routePhase <= 3 &&
+                  " The canvas shows its current content: edits made in later phases replace earlier text."}
+              </span>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => navigate(participantRoute(serverPhaseNumber))}
+              >
+                Back to current phase
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="card">
@@ -1413,6 +1707,17 @@ export default function ProjectPhasePage({ token, me }) {
                           : "Get overview"}
                       </button>
                     )}
+                    {showPhase3OverviewButton && (
+                      <p className="hint">
+                        {aiSpecialists.length > 1
+                          ? `Each AI specialist reviews the canvas independently, then their views are consolidated into one overview per field: ${aiSpecialists
+                              .map((specialist) => specialist.role_title)
+                              .join(", ")}.`
+                          : aiSpecialists.length === 1
+                          ? `Overview will reflect the perspective of: ${aiSpecialists[0].role_title}`
+                          : "No AI specialist configured: the overview uses a research methodology perspective."}
+                      </p>
+                    )}
                   </div>
                 )}
               </div>
@@ -1422,11 +1727,11 @@ export default function ProjectPhasePage({ token, me }) {
                     field={f}
                     value={entries[f]}
                     suggestion={suggestionsEnabled ? suggestions[f] : null}
-                    aiOverview={
+                    aiOverviews={
                       routePhase === 3 ? phase3OverviewsByField[f] : null
                     }
                     aiOverviewPending={
-                      routePhase === 3 ? phase3OverviewPendingByField[f] : false
+                      routePhase === 3 && isPhase3OverviewPending
                     }
                     pending={
                       suggestionsEnabled
@@ -1513,6 +1818,214 @@ export default function ProjectPhasePage({ token, me }) {
                   participant group.
                 </p>
               )}
+            </div>
+          )}
+
+          {routePhase === 2 && isReviewMode && (
+            <div className="field-card ai-specialist-card card-stack">
+              <div className="invite-card-header">
+                <h3>AI Specialists</h3>
+              </div>
+              {aiSpecialists.length > 0 ? (
+                <div className="ai-specialist-list">
+                  {aiSpecialists.map((specialist, index) => (
+                    <div
+                      className="ai-specialist-item"
+                      key={specialist.participant_id}
+                    >
+                      <span className="phase-badge">
+                        Specialist {index + 1}
+                      </span>
+                      <strong>{specialist.role_title}</strong>
+                      {specialist.role_description && (
+                        <p className="muted">{specialist.role_description}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="hint">No AI specialist was configured.</p>
+              )}
+            </div>
+          )}
+
+          {routePhase === 2 && canActOnPhase && (
+            <div className="field-card ai-specialist-card card-stack">
+              <div className="invite-card-header">
+                <h3>AI Specialists (optional)</h3>
+                <p className="muted">
+                  If no one in this workshop covers a needed expertise, have
+                  the AI join as that specialist (up to {maxAiSpecialists}).
+                  Each one reviews the reformulated problem and evaluates it
+                  from its own perspective, alongside the human participants.
+                </p>
+              </div>
+              {!project?.ai_mode_enabled && (
+                <p className="hint">
+                  AI mode is disabled for this project, so AI specialists
+                  cannot be added.
+                </p>
+              )}
+              {aiSpecialists.length > 0 && (
+                <div className="ai-specialist-list">
+                  {aiSpecialists.map((specialist, index) => {
+                    const specialistId = specialist.participant_id;
+                    const draft =
+                      aiSpecialistDrafts[specialistId] ||
+                      aiSpecialistToDraft(specialist);
+                    const isSaving = savingAiSpecialistId === specialistId;
+                    const isRemoving = removingAiSpecialistId === specialistId;
+                    return (
+                      <div className="ai-specialist-item" key={specialistId}>
+                        <span className="phase-badge">
+                          Specialist {index + 1}
+                        </span>
+                        <div className="form-grid">
+                          <label htmlFor={`ai-specialist-role-${specialistId}`}>
+                            Specialist role
+                          </label>
+                          <input
+                            id={`ai-specialist-role-${specialistId}`}
+                            type="text"
+                            value={draft.role_title}
+                            maxLength={aiSpecialistRoleMaxLength}
+                            onChange={(event) =>
+                              changeAiSpecialistDraft(
+                                specialistId,
+                                "role_title",
+                                event.target.value
+                              )
+                            }
+                            disabled={isSaving || isRemoving}
+                          />
+                          <label
+                            htmlFor={`ai-specialist-context-${specialistId}`}
+                          >
+                            Context
+                          </label>
+                          <textarea
+                            id={`ai-specialist-context-${specialistId}`}
+                            value={draft.role_description}
+                            maxLength={aiSpecialistContextMaxLength}
+                            onChange={(event) =>
+                              changeAiSpecialistDraft(
+                                specialistId,
+                                "role_description",
+                                event.target.value
+                              )
+                            }
+                            placeholder="Experience, focus and what this specialist should pay attention to."
+                            disabled={isSaving || isRemoving}
+                          />
+                          <p className="hint">
+                            {draft.role_description.length}/
+                            {aiSpecialistContextMaxLength} characters
+                          </p>
+                        </div>
+                        <div className="row gap-8">
+                          <button
+                            className="btn btn-secondary"
+                            type="button"
+                            onClick={() => updateAiSpecialist(specialistId)}
+                            disabled={
+                              isSaving ||
+                              isRemoving ||
+                              !draft.role_title.trim() ||
+                              !isAiSpecialistDraftDirty(specialist)
+                            }
+                          >
+                            {isSaving ? "Saving..." : "Save changes"}
+                          </button>
+                          <button
+                            className="btn btn-tertiary"
+                            type="button"
+                            onClick={() => removeAiSpecialist(specialistId)}
+                            disabled={isSaving || isRemoving}
+                          >
+                            {isRemoving ? "Removing..." : "Remove"}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {aiSpecialists.length < maxAiSpecialists ? (
+                <div className="ai-specialist-item ai-specialist-new">
+                  <div className="form-grid">
+                    <label htmlFor="ai-specialist-role-new">
+                      {aiSpecialists.length > 0
+                        ? "Add another specialist role"
+                        : "Specialist role"}
+                    </label>
+                    <input
+                      id="ai-specialist-role-new"
+                      type="text"
+                      value={newAiSpecialist.role_title}
+                      maxLength={aiSpecialistRoleMaxLength}
+                      onChange={(event) =>
+                        setNewAiSpecialist((prev) => ({
+                          ...prev,
+                          role_title: event.target.value,
+                        }))
+                      }
+                      placeholder="e.g. Sales specialist"
+                      disabled={
+                        savingAiSpecialistId === "new" ||
+                        !project?.ai_mode_enabled
+                      }
+                    />
+                    <label htmlFor="ai-specialist-context-new">
+                      Context (recommended)
+                    </label>
+                    <textarea
+                      id="ai-specialist-context-new"
+                      value={newAiSpecialist.role_description}
+                      maxLength={aiSpecialistContextMaxLength}
+                      onChange={(event) =>
+                        setNewAiSpecialist((prev) => ({
+                          ...prev,
+                          role_description: event.target.value,
+                        }))
+                      }
+                      placeholder="Experience, focus and what this specialist should pay attention to. The more specific the context, the more specific its answers."
+                      disabled={
+                        savingAiSpecialistId === "new" ||
+                        !project?.ai_mode_enabled
+                      }
+                    />
+                    <p className="hint">
+                      {newAiSpecialist.role_description.length}/
+                      {aiSpecialistContextMaxLength} characters
+                    </p>
+                  </div>
+                  <div className="row gap-8">
+                    <button
+                      className="btn btn-secondary"
+                      type="button"
+                      onClick={addAiSpecialist}
+                      disabled={
+                        savingAiSpecialistId === "new" ||
+                        !project?.ai_mode_enabled ||
+                        !newAiSpecialist.role_title.trim()
+                      }
+                    >
+                      {savingAiSpecialistId === "new"
+                        ? "Adding..."
+                        : "Add AI specialist"}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <p className="hint">
+                  Maximum of {maxAiSpecialists} AI specialists reached. Remove
+                  one to add another.
+                </p>
+              )}
+              <p className="hint">
+                {aiSpecialists.length} of {maxAiSpecialists} AI specialists
+                configured.
+              </p>
             </div>
           )}
 
@@ -1621,6 +2134,81 @@ export default function ProjectPhasePage({ token, me }) {
                     {completionInfo.pending_invites > 0 &&
                       ` - ${completionInfo.pending_invites} invite(s) pending acceptance`}
                   </p>
+                </div>
+              )}
+              {!isParticipant && aiSpecialists.length > 0 && (
+                <div className="field-card card-stack">
+                  <h3>AI Specialists</h3>
+                  <p className="muted">
+                    Each AI specialist evaluates the problem independently,
+                    without seeing anyone else's scores. Their evaluations are
+                    shown separately in phase 5 and never count toward the
+                    consolidated results.
+                  </p>
+                  <div className="ai-specialist-list">
+                    {aiSpecialists.map((specialist) => {
+                      const specialistId = specialist.participant_id;
+                      const evaluation = aiEvaluations.find(
+                        (item) => item.participant_id === specialistId
+                      );
+                      const isGenerating =
+                        generatingAiEvaluationIds.includes(specialistId);
+                      const isResetting =
+                        resettingAiEvaluationId === specialistId;
+                      return (
+                        <div className="ai-specialist-item" key={specialistId}>
+                          <strong>{specialist.role_title}</strong>
+                          {evaluation?.is_complete ? (
+                            <div className="row gap-8">
+                              <span className="phase-badge">Evaluated</span>
+                              {canActOnPhase && (
+                                <button
+                                  className="btn btn-secondary btn-sm"
+                                  type="button"
+                                  onClick={() => resetAiEvaluation(specialistId)}
+                                  disabled={isResetting}
+                                >
+                                  {isResetting
+                                    ? "Resetting..."
+                                    : "Reset AI evaluation"}
+                                </button>
+                              )}
+                            </div>
+                          ) : canActOnPhase ? (
+                            <div className="row gap-8">
+                              <button
+                                className="btn btn-primary btn-sm"
+                                type="button"
+                                onClick={() =>
+                                  generateAiEvaluations([specialistId])
+                                }
+                                disabled={isGenerating}
+                              >
+                                {isGenerating
+                                  ? "Generating..."
+                                  : "Generate AI evaluation"}
+                              </button>
+                            </div>
+                          ) : (
+                            <p className="hint">Not evaluated.</p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {canActOnPhase && pendingAiEvaluationIds.length > 1 && (
+                    <div className="row gap-8">
+                      <button
+                        className="btn btn-primary"
+                        type="button"
+                        onClick={() =>
+                          generateAiEvaluations(pendingAiEvaluationIds)
+                        }
+                      >
+                        Generate all pending AI evaluations
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </>
@@ -1752,6 +2340,43 @@ export default function ProjectPhasePage({ token, me }) {
                   <p className="muted">No comments submitted yet.</p>
                 )}
               </div>
+              {completedAiEvaluations.length > 0 && (
+                <div className="decision-section">
+                  <div className="decision-divider" />
+                  <h2>
+                    AI Specialist Perspective
+                    {completedAiEvaluations.length === 1 ? "" : "s"}
+                  </h2>
+                  <div className="comments-grid">
+                    {completedAiEvaluations.map((evaluation) => (
+                      <div
+                        className="field-card comment-card"
+                        key={evaluation.participant_id}
+                      >
+                        <h3>{evaluation.role_title}</h3>
+                        <div className="comment-list">
+                          {phase5ResultOrder.map(({ metricKey, label }) => {
+                            const entry = evaluation.scores?.[metricKey];
+                            if (!entry) return null;
+                            return (
+                              <p key={metricKey}>
+                                <strong>
+                                  {label}: {entry.value}/7
+                                </strong>{" "}
+                                {entry.comment}
+                              </p>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="hint">
+                    Shown for comparison only — not included in the
+                    consolidated results above or in the final decision.
+                  </p>
+                </div>
+              )}
               {!isParticipant && (
                 <div className="decision-section">
                   <div className="decision-divider" />
@@ -1780,7 +2405,7 @@ export default function ProjectPhasePage({ token, me }) {
 
           <div className="action-divider" />
           <div className="action-group primary-group">
-            {config.canSaveDraft && !isParticipant && (
+            {config.canSaveDraft && canActOnPhase && (
               <button className="btn btn-secondary" onClick={saveAllDraft}>
                 Save draft
               </button>

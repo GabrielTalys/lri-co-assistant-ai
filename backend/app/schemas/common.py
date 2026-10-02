@@ -58,6 +58,8 @@ class ParticipantOut(BaseModel):
     user_id: int | None = None
     email: str | None = None
     role: str
+    is_ai: bool = False
+    ai_persona_role: str | None = None
     created_at: datetime
 
 
@@ -114,15 +116,64 @@ class CanvasSingleRecommendationResponse(BaseModel):
     status: str
 
 
+class Phase3Perspective(BaseModel):
+    specialist_id: int
+    role_title: str | None = None
+    overviews: dict[str, str]
+
+
 class Phase3OverviewResponse(BaseModel):
     generated_count: int
     field_count: int
     overviews: dict[str, str]
+    # 'default' (methodologist persona), 'specialist' (one AI specialist) or 'panel'
+    # (several specialists consolidated; their individual reviews are in `perspectives`).
+    mode: str = 'default'
+    specialist_id: int | None = None
+    role_title: str | None = None
+    perspectives: list[Phase3Perspective] = Field(default_factory=list)
+    failed_specialists: list[str] = Field(default_factory=list)
 
 
 class Phase3SingleOverviewResponse(BaseModel):
     question_key: str
     overview_text: str
+    mode: str = 'default'
+    specialist_id: int | None = None
+    role_title: str | None = None
+    perspectives: list[Phase3Perspective] = Field(default_factory=list)
+    failed_specialists: list[str] = Field(default_factory=list)
+
+
+class AISpecialistUpsertRequest(BaseModel):
+    role_title: str
+    role_description: str | None = None
+
+
+class AISpecialistOut(BaseModel):
+    participant_id: int
+    role_title: str | None = None
+    role_description: str | None = None
+
+
+class AISpecialistListOut(BaseModel):
+    items: list[AISpecialistOut]
+    max_specialists: int
+
+
+class AISpecialistDeleteResponse(BaseModel):
+    ok: bool = True
+
+
+class AIEvaluationScoreOut(BaseModel):
+    value: int
+    comment: str
+
+
+class AIEvaluationResponse(BaseModel):
+    participant_id: int
+    role_title: str | None = None
+    scores: dict[str, AIEvaluationScoreOut]
 
 
 class ScoreSubmitRequest(BaseModel):

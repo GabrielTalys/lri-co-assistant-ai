@@ -27,7 +27,7 @@ export default function FieldEditor({
   onChange,
   onConfirm,
   suggestion,
-  aiOverview,
+  aiOverviews,
   aiOverviewPending,
   onAccept,
   onDismiss,
@@ -54,7 +54,11 @@ export default function FieldEditor({
     field,
     suggestion?.suggested_text
   );
-  const formattedOverviewText = formatSuggestionText(field, aiOverview);
+  // Overviews arrive already line-structured ("Overview: ... / Suggestions: • ..."),
+  // so they skip formatSuggestionText, whose numbering split would break "RQ1 - ...".
+  const overviews = (aiOverviews || []).filter((overview) =>
+    String(overview?.text || "").trim()
+  );
 
   return (
     <div className="field-card">
@@ -104,20 +108,42 @@ export default function FieldEditor({
           </div>
         </div>
       )}
-      {!readOnly && aiOverviewPending && <p className="hint">Overview pending...</p>}
-      {!readOnly && formattedOverviewText && (
-        <div className="suggestion-inline suggestion-inline-ai">
-          <p>{formattedOverviewText}</p>
-          <div className="row gap-8">
-            <button
-              className="btn btn-sm btn-secondary"
-              onClick={() => onDismissOverview?.(field)}
-            >
-              ✕
-            </button>
-          </div>
-        </div>
+      {!readOnly && aiOverviewPending && (
+        <p className="hint">Overview pending... (30s - 90s)</p>
       )}
+      {!readOnly &&
+        overviews.map((overview) => (
+          <div
+            className="suggestion-inline suggestion-inline-ai"
+            key={overview.id}
+          >
+            {overview.label && (
+              <p className="suggestion-inline-label">{overview.label}</p>
+            )}
+            <p>{String(overview.text).trim()}</p>
+            {overview.perspectives?.length > 0 && (
+              <details className="overview-perspectives">
+                <summary>See each specialist's analysis</summary>
+                {overview.perspectives.map((perspective) => (
+                  <div className="overview-perspective" key={perspective.id}>
+                    <p className="suggestion-inline-label">
+                      {perspective.label}
+                    </p>
+                    <p>{String(perspective.text || "").trim()}</p>
+                  </div>
+                ))}
+              </details>
+            )}
+            <div className="row gap-8">
+              <button
+                className="btn btn-sm btn-secondary"
+                onClick={() => onDismissOverview?.(field, overview.id)}
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        ))}
     </div>
   );
 }

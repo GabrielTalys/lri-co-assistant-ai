@@ -6,6 +6,7 @@ const PHASES = [1, 2, 3, 4, 5];
 export default function PhaseStepper({
   currentPhaseNumber,
   activePhaseNumber,
+  onSelectPhase,
 }) {
   return (
     <aside className="phase-sidebar card">
@@ -16,14 +17,15 @@ export default function PhaseStepper({
           const isActive = phase === activePhaseNumber;
           const isLocked = phase > currentPhaseNumber;
           const isCompleted = phase < currentPhaseNumber;
-
-          return (
-            <li
-              key={phase}
-              className={`phase-item ${isCurrent ? "current" : ""} ${
-                isActive ? "active" : ""
-              } ${isLocked ? "locked" : ""}`}
-            >
+          // Completed phases can be reopened (read-only) and the current one
+          // returned to; future phases stay locked.
+          const isSelectable =
+            typeof onSelectPhase === "function" && !isLocked && !isActive;
+          const className = `phase-item ${isCurrent ? "current" : ""} ${
+            isActive ? "active" : ""
+          } ${isLocked ? "locked" : ""} ${isSelectable ? "selectable" : ""}`;
+          const content = (
+            <>
               <span>Phase {phase}</span>
               {isCompleted ? (
                 <Check
@@ -39,6 +41,32 @@ export default function PhaseStepper({
                 />
               ) : (
                 <span className="phase-icon-placeholder" aria-hidden="true" />
+              )}
+            </>
+          );
+
+          return (
+            <li key={phase}>
+              {isSelectable ? (
+                <button
+                  type="button"
+                  className={className}
+                  onClick={() => onSelectPhase(phase)}
+                  title={
+                    isCompleted
+                      ? `View Phase ${phase} (read-only)`
+                      : `Back to Phase ${phase}`
+                  }
+                >
+                  {content}
+                </button>
+              ) : (
+                <div
+                  className={className}
+                  aria-current={isActive ? "step" : undefined}
+                >
+                  {content}
+                </div>
               )}
             </li>
           );

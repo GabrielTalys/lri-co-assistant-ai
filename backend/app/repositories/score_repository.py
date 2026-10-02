@@ -48,6 +48,14 @@ class ScoreRepository:
             ).order_by(Score.id.asc())
         ).all()
 
+    def list_by_participant_all_cycles(self, run_id: int, participant_id: int) -> list[Score]:
+        return self.db.scalars(
+            select(Score).where(
+                Score.run_id == run_id,
+                Score.participant_id == participant_id,
+            ).order_by(Score.id.asc())
+        ).all()
+
     def delete_by_participant(self, run_id: int, participant_id: int, cycle: int) -> int:
         result = self.db.execute(
             delete(Score).where(
