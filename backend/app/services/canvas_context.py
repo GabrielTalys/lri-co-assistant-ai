@@ -25,9 +25,8 @@ def build_canvas_context(canvas_repo: CanvasRepository, run_id: int, cycle: int)
         else:
             empty_questions.append(question)
 
-    context_lines = [
-        f"{item['question'].title} ({item['question'].key}): {item['content']}"
-        for item in filled_items
-    ]
+    # Only the field titles go to the LLM: the legacy keys do not match what the fields
+    # hold (e.g. 'risks' stores the research questions) and would mislead the model.
+    context_lines = [f"{item['question'].title}: {item['content']}" for item in filled_items]
     context_text = '\n'.join(context_lines).strip()
     return filled_items, empty_questions, context_text

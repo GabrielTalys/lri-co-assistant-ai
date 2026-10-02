@@ -116,15 +116,33 @@ class CanvasSingleRecommendationResponse(BaseModel):
     status: str
 
 
+class Phase3Perspective(BaseModel):
+    specialist_id: int
+    role_title: str | None = None
+    overviews: dict[str, str]
+
+
 class Phase3OverviewResponse(BaseModel):
     generated_count: int
     field_count: int
     overviews: dict[str, str]
+    # 'default' (methodologist persona), 'specialist' (one AI specialist) or 'panel'
+    # (several specialists consolidated; their individual reviews are in `perspectives`).
+    mode: str = 'default'
+    specialist_id: int | None = None
+    role_title: str | None = None
+    perspectives: list[Phase3Perspective] = Field(default_factory=list)
+    failed_specialists: list[str] = Field(default_factory=list)
 
 
 class Phase3SingleOverviewResponse(BaseModel):
     question_key: str
     overview_text: str
+    mode: str = 'default'
+    specialist_id: int | None = None
+    role_title: str | None = None
+    perspectives: list[Phase3Perspective] = Field(default_factory=list)
+    failed_specialists: list[str] = Field(default_factory=list)
 
 
 class AISpecialistUpsertRequest(BaseModel):
@@ -133,10 +151,14 @@ class AISpecialistUpsertRequest(BaseModel):
 
 
 class AISpecialistOut(BaseModel):
-    is_configured: bool = False
-    participant_id: int | None = None
+    participant_id: int
     role_title: str | None = None
     role_description: str | None = None
+
+
+class AISpecialistListOut(BaseModel):
+    items: list[AISpecialistOut]
+    max_specialists: int
 
 
 class AISpecialistDeleteResponse(BaseModel):

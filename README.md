@@ -43,6 +43,37 @@ and supporting consistency throughout the five LRI phases:
 AI-generated suggestions can be accepted, edited, or discarded at any point:
 the researcher remains the central decision-maker.
 
+### 2.1 Extension: Configurable AI Specialists
+
+This version extends the tool with optional **AI specialists**: AI participants
+that play a specific expert role when no human with that expertise is present
+in the workshop.
+
+- **Phase 2:** the facilitator can configure **up to 3 AI specialists**, each
+  with a role (e.g., _UX designer for mobile products_) and a free-text
+  context describing their experience and focus. The more specific the
+  context, the more specific the specialist's answers.
+- **Phase 3:** "Get overview" runs an **AI specialist panel**. Each specialist
+  reviews the whole canvas independently, from its own role; then a
+  moderator consolidates the reviews into **one overview per canvas field**
+  with the specialists' consensus, their divergences, and exactly one
+  suggestion per specialist. The individual reviews remain available under
+  "See each specialist's analysis". With one specialist, its review is shown
+  directly; with none, the overview comes from a research-methodology
+  perspective. A panel run takes about 30-90 s (specialists + 1 LLM calls).
+- **Phase 4:** each AI specialist evaluates the problem **independently**
+  (blind to all other scores) on the same 1-7 scale as the humans, with a
+  mandatory justification per criterion.
+- **Phase 5:** AI evaluations are shown in separate cards, for comparison
+  only. They are **never** included in the consolidated medians, in the
+  phase 4 completion gate, or in the Go / Pivot / Abort decision, which stay
+  human-only.
+- All AI prompts share quality rules: answers must be grounded in what the
+  team wrote, bring role-specific knowledge, avoid generic filler, never
+  invent facts about the team's context, and use the canvas language.
+- The facilitator can reopen completed phases in **read-only** mode from the
+  "LRI Phases" sidebar.
+
 ---
 
 ## 3. Repository Structure
@@ -87,10 +118,18 @@ If running without Docker:
 
 ### External Service
 
-- An **OpenAI API key** is required for AI-assisted suggestions and synthesis.
-  Other OpenAI models can be used by adjusting `LLM_MODEL`.
-- API usage will incur costs on the key holder's OpenAI account. A full
-  execution of the demonstration scenario typically costs less than US$ 0.10.
+AI-assisted features need an API key from one LLM provider, selected with
+`LLM_PROVIDER`:
+
+- **Google Gemini (default, free tier):** create a free key at
+  <https://aistudio.google.com/apikey> and set `GEMINI_API_KEY`. The free
+  tier has rate limits and may occasionally answer "high demand" (HTTP 503);
+  the backend retries with backoff and then falls back to a lighter Gemini
+  model (`GEMINI_FALLBACK_MODEL`).
+- **OpenAI (paid, optional):** set `LLM_PROVIDER=openai` and
+  `OPENAI_API_KEY`. Other OpenAI models can be used by adjusting `LLM_MODEL`.
+  API usage incurs costs on the key holder's OpenAI account; a full execution
+  of the demonstration scenario typically costs less than US$ 0.10.
 
 ### Browsers Tested
 
@@ -124,9 +163,10 @@ docker compose up --build
 # 5. Wait until db, backend, worker, and frontend report ready.
 ```
 
-The stack starts without an OpenAI API key, but AI-assisted features require
-`OPENAI_API_KEY`. To execute the complete AI-assisted workflow, edit `.env`
-before starting the stack and set `OPENAI_API_KEY` (see Section 6).
+The stack starts without an LLM API key, but AI-assisted features require one.
+To execute the complete AI-assisted workflow, edit `.env` before starting the
+stack and set `GEMINI_API_KEY` (default provider) or `LLM_PROVIDER=openai` with
+`OPENAI_API_KEY` (see Section 6).
 
 Once the stack is up:
 
@@ -157,7 +197,7 @@ docker compose down
 
 In another terminal, from the artifact root, run the basic smoke test. This test
 validates authentication, project creation, canvas editing, invite creation,
-and phase polling without calling the OpenAI API.
+and phase polling without calling any LLM API.
 
 ```bash
 ./scripts/smoke_test.sh
@@ -184,23 +224,39 @@ The `.env.example` file lists all environment variables required by the
 application. Copy it to `.env` and fill in real values. **Never commit `.env`
 to any repository.**
 
-OpenAI-backed execution:
+Gemini-backed execution (default, free tier):
 
 ```env
-OPENAI_API_KEY=your_openai_api_key
-LLM_MODEL=gpt-4o-mini
+LLM_PROVIDER=gemini
+GEMINI_API_KEY=your_gemini_api_key
+GEMINI_MODEL=gemini-3.6-flash
+# Used when GEMINI_MODEL is still overloaded after retries; leave empty to disable
+GEMINI_FALLBACK_MODEL=gemini-3.5-flash-lite
+GEMINI_RETRY_ATTEMPTS=4
 BACKEND_PORT=8000
 FRONTEND_PORT=5173
 VITE_API_URL=http://localhost:8000
 ```
 
-### Which Features Work Without an OpenAI Key
+OpenAI-backed execution:
 
-If `OPENAI_API_KEY` is left empty, the application still supports project
-creation and management, manual completion of the Problem Vision board,
-collaborative workshop invitations, semantic differential scale assessment,
-aggregation, and export. AI-assisted suggestions and synthesis require a
-configured OpenAI API key.
+```env
+LLM_PROVIDER=openai
+OPENAI_API_KEY=your_openai_api_key
+LLM_MODEL=gpt-4o-mini
+```
+
+Gemini model names change over time: if the API answers that a model is no
+longer available, set `GEMINI_MODEL` to a current one.
+
+### Which Features Work Without an LLM Key
+
+If no key is configured for the selected provider, the application still
+supports project creation and management, manual completion of the Problem
+Vision board, collaborative workshop invitations, AI specialist
+configuration, semantic differential scale assessment, aggregation, and
+export. AI-assisted suggestions, phase 3 overviews and AI specialist
+evaluations require a configured LLM API key.
 
 ---
 
@@ -260,7 +316,7 @@ A successful execution of the scenario above is confirmed when:
 
 > Because LLM outputs are non-deterministic, the exact textual content of
 > AI-generated suggestions **is not expected to be identical** across
-> executions when running with a real OpenAI key. The verifiable properties
+> executions when running with a real LLM key. The verifiable properties
 > are the structural ones listed above: structural validity, presence of the
 > seven attributes, non-empty mandatory fields, preservation of user edits,
 > and successful export.
@@ -294,9 +350,16 @@ A successful execution of the scenario above is confirmed when:
   executions. Structural properties (Section 9) are stable.
 - Empirical evaluation with independent researchers and practitioners is
   planned as future work.
-- Phase 2 (Problem Vision Alignment) and Phase 4 (Research Problem
-  Assessment) are intentionally conducted without AI support in the current
-  version, to preserve participant autonomy and avoid biasing human judgment.
+- The human steps of Phase 2 (Problem Vision Alignment) and Phase 4
+  (Research Problem Assessment) are intentionally conducted without AI
+  support, to preserve participant autonomy and avoid biasing human judgment.
+  Optional AI specialists may also evaluate in Phase 4, but their scores are
+  shown separately and never enter the consolidated results or the decision.
+- Phase 3 overviews are not persisted: they disappear when the page is
+  reloaded or the phase advances. The canvas keeps only its latest text, so
+  reopening an earlier phase shows the current content.
+- On the Gemini free tier, an AI specialist panel can take longer than usual
+  when the provider is under heavy load.
 
 ---
 
@@ -305,9 +368,10 @@ A successful execution of the scenario above is confirmed when:
 - **Data collected during invited workshops:** participant name and company
   (optional). Consent is required at the invite-join step.
 - **Data sent to the LLM provider:** text submitted by users to the
-  AI service layer is forwarded to the configured LLM provider (OpenAI by
-  default) and is subject to that provider's data-handling policies. Do not
-  submit confidential material through the hosted demo.
+  AI service layer is forwarded to the configured LLM provider (Google Gemini
+  by default, or OpenAI) and is subject to that provider's data-handling
+  policies. Free-tier providers may use submitted content to improve their
+  models. Do not submit confidential material through the hosted demo.
 - **Exported reports** are not anonymized by default; anyone with the export
   can see participant names and comments. Downstream anonymization is the
   responsibility of the exporting user.

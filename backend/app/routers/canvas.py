@@ -114,12 +114,13 @@ def generate_canvas_recommendation(
 @router.post('/projects/{run_id}/canvas/overview', response_model=Phase3OverviewResponse)
 def generate_phase3_overview(
     run_id: int,
+    specialist_id: int | None = None,
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_optional_current_user),
 ):
     _ensure_owner_access(run_id=run_id, db=db, current_user=current_user)
     try:
-        payload = AISuggestionService(db).generate_phase3_overview(run_id)
+        payload = AISuggestionService(db).generate_phase3_overview(run_id, specialist_id=specialist_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -132,12 +133,15 @@ def generate_phase3_overview(
 def generate_phase3_canvas_overview(
     run_id: int,
     question_key: str,
+    specialist_id: int | None = None,
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_optional_current_user),
 ):
     _ensure_owner_access(run_id=run_id, db=db, current_user=current_user)
     try:
-        payload = AISuggestionService(db).generate_phase3_canvas_overview(run_id, question_key)
+        payload = AISuggestionService(db).generate_phase3_canvas_overview(
+            run_id, question_key, specialist_id=specialist_id
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

@@ -32,9 +32,20 @@ class ParticipantRepository:
     def find_by_email(self, run_id: int, email: str) -> Participant | None:
         return self.db.scalar(select(Participant).where(Participant.run_id == run_id, Participant.email == email))
 
-    def find_ai_specialist(self, run_id: int) -> Participant | None:
+    def list_ai_specialists(self, run_id: int) -> list[Participant]:
+        return self.db.scalars(
+            select(Participant)
+            .where(Participant.run_id == run_id, Participant.is_ai.is_(True))
+            .order_by(Participant.id.asc())
+        ).all()
+
+    def get_ai_specialist(self, run_id: int, participant_id: int) -> Participant | None:
         return self.db.scalar(
-            select(Participant).where(Participant.run_id == run_id, Participant.is_ai.is_(True))
+            select(Participant).where(
+                Participant.id == participant_id,
+                Participant.run_id == run_id,
+                Participant.is_ai.is_(True),
+            )
         )
 
     def create_ai_specialist(

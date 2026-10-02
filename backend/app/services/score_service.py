@@ -75,7 +75,7 @@ class ScoreService:
         }
         all_scores = self.score_repo.list_by_run(run_id, cycle=run.current_cycle)
 
-        # The AI specialist's evaluation is shown separately (see get_ai_evaluation)
+        # The AI specialists' evaluations are shown separately (see get_ai_evaluations)
         # and must never influence the consolidated numbers that drive the human
         # GO/PIVOT/ABORT decision.
         values_by_metric: dict[str, list[int]] = defaultdict(list)
@@ -112,7 +112,7 @@ class ScoreService:
 
         required_metrics = {'impact', 'feasibility', 'alignment'}
         participants = self.participant_repo.list_by_run(run_id)
-        # The AI specialist never blocks or counts toward the human completion gate.
+        # AI specialists never block or count toward the human completion gate.
         respondents = [p for p in participants if p.role != 'facilitator' and not p.is_ai]
         respondent_ids = {p.id for p in respondents}
 
@@ -174,7 +174,7 @@ class ScoreService:
 
         grouped: dict[int, dict] = {}
         for row in rows:
-            # The AI specialist gets its own dedicated card (get_ai_evaluation),
+            # Each AI specialist gets its own dedicated card (get_ai_evaluations),
             # never mixed into the generic human comments grid.
             if row.participant_id in ai_participant_ids:
                 continue
@@ -212,26 +212,24 @@ class ScoreService:
             cycle=run.current_cycle,
         )
 
-    def get_ai_evaluation(self, run_id: int) -> dict | None:
+    def get_ai_evaluations(self, run_id: int) -> list[dict]:
         run = self.run_repo.get(run_id)
         if run is None:
             raise ValueError('Run not found')
 
-        ai_participant = next(
-            (p for p in self.participant_repo.list_by_run(run_id) if p.is_ai), None
-        )
-        if ai_participant is None:
-            return None
-
-        rows = self.score_repo.list_by_participant(
-            run_id=run_id, participant_id=ai_participant.id, cycle=run.current_cycle
-        )
-        scores = {row.metric_key: {'value': row.value, 'comment': row.comment} for row in rows}
-
-        return {
-            'participant_id': ai_participant.id,
-            'role_title': ai_participant.ai_persona_role,
-            'role_description': ai_participant.ai_persona_description,
-            'scores': scores,
-            'is_complete': {'impact', 'feasibility', 'alignment'}.issubset(scores),
-        }
+        evaluations = []
+        for ai_participant in self.participant_repo.list_ai_specialists(run_id):
+            rows = self.score_repo.list_by_participant(
+                run_id=run_id, participant_id=ai_participant.id, cycle=run.current_cycle
+            )
+            scores = {row.metric_key: {'value': row.value, 'comment': row.comment} for row in rows}
+            evaluations.append(
+                {
+                    'participant_id': ai_participant.id,
+                    'role_title': ai_participant.ai_persona_role,
+                    'role_description': ai_participant.ai_persona_description,
+                    'scores': scores,
+                    'is_complete': {'impact', 'feasibility', 'alignment'}.issubset(scores),
+                }
+            )
+        return evaluations

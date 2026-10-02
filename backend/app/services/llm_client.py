@@ -4,15 +4,25 @@ from app.core.config import settings
 
 
 class LLMClient:
-    def generate(self, prompt: str) -> str:
+    """`system` carries the persona/standing instructions (system prompt), kept apart
+    from the task prompt so the model holds the specialist role more firmly."""
+
+    def generate(self, prompt: str, *, system: str | None = None) -> str:
         raise NotImplementedError
 
-    def generate_json(self, prompt: str, schema: dict, *, schema_name: str = 'response') -> dict:
+    def generate_json(
+        self,
+        prompt: str,
+        schema: dict,
+        *,
+        schema_name: str = 'response',
+        system: str | None = None,
+    ) -> dict:
         """Generate a response constrained to the given JSON schema and return it parsed.
 
-        Used by the phase 4 AI specialist evaluation, which must always return a
-        numeric score plus a non-empty justification per metric — free-text parsing
-        would be too fragile for that guarantee.
+        Used by the phase 3 specialist overviews and the phase 4 AI specialist
+        evaluation, which need one well-formed entry per canvas field / metric —
+        free-text parsing would be too fragile for that guarantee.
         """
         raise NotImplementedError
 
@@ -50,10 +60,11 @@ class OpenAILLMClient(LLMClient):
             timeout=settings.llm_timeout_seconds,
         )
 
-    def generate(self, prompt: str) -> str:
+    def generate(self, prompt: str, *, system: str | None = None) -> str:
         response = self.client.responses.create(
             model=settings.llm_model,
             input=prompt,
+            **({'instructions': system} if system else {}),
         )
 
         text = (getattr(response, 'output_text', '') or '').strip()
@@ -74,11 +85,19 @@ class OpenAILLMClient(LLMClient):
 
         raise RuntimeError('OpenAI response did not contain any text output')
 
-    def generate_json(self, prompt: str, schema: dict, *, schema_name: str = 'response') -> dict:
+    def generate_json(
+        self,
+        prompt: str,
+        schema: dict,
+        *,
+        schema_name: str = 'response',
+        system: str | None = None,
+    ) -> dict:
         strict_schema = _to_strict_openai_schema(schema)
         response = self.client.responses.create(
             model=settings.llm_model,
             input=prompt,
+            **({'instructions': system} if system else {}),
             text={
                 'format': {
                     'type': 'json_schema',
@@ -131,14 +150,24 @@ class GeminiLLMClient(LLMClient):
                 raise
             return self.client.models.generate_content(model=self.fallback_model, **kwargs)
 
-    def generate(self, prompt: str) -> str:
-        response = self._generate_content(contents=prompt)
+    def generate(self, prompt: str, *, system: str | None = None) -> str:
+        from google.genai import types
+
+        config = types.GenerateContentConfig(system_instruction=system) if system else None
+        response = self._generate_content(contents=prompt, config=config)
         text = (getattr(response, 'text', '') or '').strip()
         if not text:
             raise RuntimeError('Gemini response did not contain any text output')
         return text
 
-    def generate_json(self, prompt: str, schema: dict, *, schema_name: str = 'response') -> dict:
+    def generate_json(
+        self,
+        prompt: str,
+        schema: dict,
+        *,
+        schema_name: str = 'response',
+        system: str | None = None,
+    ) -> dict:
         from google.genai import types
 
         # The SDK's Schema type uses uppercase OpenAPI type names (OBJECT, STRING, ...),
@@ -152,6 +181,7 @@ class GeminiLLMClient(LLMClient):
         response = self._generate_content(
             contents=prompt,
             config=types.GenerateContentConfig(
+                system_instruction=system,
                 response_mime_type='application/json',
                 response_schema=gemini_schema,
             ),

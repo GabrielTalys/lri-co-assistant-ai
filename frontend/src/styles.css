@@ -106,9 +106,18 @@ a {
 
 .board-actions {
   display: flex;
-  justify-content: flex-end;
+  flex-direction: column;
+  align-items: flex-end;
   flex-shrink: 0;
-  gap: 10px;
+  gap: 6px;
+}
+
+/* The hint under "Get overview" can list several AI specialists: keep it
+   below the button and wrapped instead of stretching the header. */
+.board-actions .hint {
+  margin-top: 0;
+  max-width: 340px;
+  text-align: right;
 }
 
 h1,
@@ -469,6 +478,34 @@ textarea {
   opacity: 0.7;
 }
 
+button.phase-item {
+  width: 100%;
+  font: inherit;
+  text-align: left;
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.phase-item.selectable:hover {
+  border-color: var(--outline);
+  color: var(--primary);
+}
+
+.review-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 12px;
+  border: 1px solid #f0d48a;
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #fff8e5;
+  color: #7a5a00;
+  font-size: 14px;
+}
+
 .phase-icon {
   flex-shrink: 0;
 }
@@ -602,6 +639,17 @@ textarea {
   margin-top: 10px;
 }
 
+/* Canvas field / assessment titles sit right above their textarea or scale. */
+.field-card > label {
+  display: block;
+  margin-bottom: 6px;
+}
+
+/* The card padding already spaces a form that opens the card. */
+.field-card > .form-grid:first-child {
+  margin-top: 0;
+}
+
 .hint {
   margin-top: 8px;
   font-size: 13px;
@@ -630,6 +678,89 @@ textarea {
 
 .suggestion-inline-ai p {
   color: #1c4ea3;
+}
+
+.suggestion-inline-ai p.suggestion-inline-label {
+  margin-bottom: 4px;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.overview-perspectives {
+  margin-bottom: 8px;
+}
+
+.overview-perspectives summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--primary);
+}
+
+.overview-perspective {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #c9dcff;
+}
+
+.suggestion-inline-ai .overview-perspective p {
+  font-weight: 400;
+}
+
+.ai-specialist-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.ai-specialist-item {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--surface-soft);
+}
+
+.ai-specialist-new {
+  margin-top: 10px;
+  background: var(--surface);
+}
+
+.phase-badge {
+  display: inline-block;
+  border: 1px solid var(--outline);
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* e.g. the "Completed" badge under a participant's assessment scale */
+.field-card > .phase-badge {
+  margin-top: 10px;
+}
+
+.ai-specialist-item > .phase-badge {
+  justify-self: start;
+}
+
+.ai-specialist-item > .form-grid,
+.form-grid > .hint {
+  margin-top: 0;
+}
+
+/* Cards whose title, text, lists and buttons would otherwise touch each other
+   (h3/p have no default margins): one consistent gap between all children. */
+.card-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.card-stack > * {
+  margin-top: 0;
+  margin-bottom: 0;
 }
 
 .assessment-grid,

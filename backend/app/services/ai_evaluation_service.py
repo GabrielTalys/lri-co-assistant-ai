@@ -3,6 +3,7 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from app.repositories import CanvasRepository, InviteRepository, ParticipantRepository, RunRepository, ScoreRepository
+from app.services.ai_prompts import Persona, build_system_instruction
 from app.services.canvas_context import build_canvas_context
 from app.services.llm_client import get_llm_client
 from app.services.score_service import ScoreService
@@ -32,24 +33,22 @@ PHASE4_AI_EVALUATION_SCHEMA = {
 }
 
 
-def _prompt_for_ai_evaluation(role_title: str, role_description: str | None, context_text: str) -> str:
-    persona_block = f'Adopt the professional perspective of: {role_title}.\n'
-    if role_description:
-        persona_block += f'Additional context about this role: {role_description}\n'
-
+def _prompt_for_ai_evaluation(context_text: str) -> str:
     metric_lines = '\n'.join(f'- {key}: {desc}' for key, desc in METRIC_DESCRIPTIONS.items())
 
     return (
-        'You are an external specialist evaluator participating in a Lean Research Inception workshop.\n'
-        f'{persona_block}'
-        "You are independently assessing a fully formulated research problem, exactly as a human "
-        "expert respondent would, without seeing any other participant's scores or comments.\n\n"
-        'Complete phase 3 formulated problem:\n'
+        'Phase 4 of the workshop: you are independently assessing the fully formulated research '
+        "problem below, exactly as a human expert respondent would, without seeing any other "
+        "participant's scores or comments.\n\n"
+        'Formulated problem (canvas field title: content):\n'
         f'{context_text}\n\n'
         'Score the problem on 3 metrics, each from 1 (lowest) to 7 (highest):\n'
         f'{metric_lines}\n\n'
-        'For every metric you MUST provide a non-empty comment of 1 to 3 sentences justifying the '
-        'score from your specialist perspective. Never leave a comment empty or generic.\n'
+        'Use the whole scale honestly from your perspective: 1-2 serious flaws, 3 below '
+        'expectations, 4 mixed, 5 solid with clear gaps, 6-7 strong. Do not default to the middle.\n'
+        'For every metric write a comment of 2 to 4 sentences that justifies the score from your '
+        'specialist perspective: point to the specific canvas content that drove the score, explain '
+        'it with knowledge from your domain, and name the single change that would raise the score.\n'
         'Respond only with JSON matching the required schema.'
     )
 
@@ -69,7 +68,7 @@ class AIEvaluationService:
         )
         self.llm_client = get_llm_client()
 
-    def generate_ai_evaluation(self, run_id: int, owner_user_id: int) -> dict:
+    def generate_ai_evaluation(self, run_id: int, owner_user_id: int, specialist_id: int) -> dict:
         run = self.run_repo.get(run_id)
         if run is None or run.owner_user_id != owner_user_id:
             raise ValueError('Run not found')
@@ -78,9 +77,9 @@ class AIEvaluationService:
         if run.current_phase != 4:
             raise ValueError('AI evaluation is only available in phase 4')
 
-        ai_participant = self.participant_repo.find_ai_specialist(run_id)
+        ai_participant = self.participant_repo.get_ai_specialist(run_id, specialist_id)
         if ai_participant is None:
-            raise ValueError('Configure an AI specialist in phase 2 before generating its evaluation')
+            raise ValueError('AI specialist not found')
 
         existing_metrics = {
             row.metric_key
@@ -97,13 +96,25 @@ class AIEvaluationService:
         if empty_questions:
             raise ValueError('Fill every canvas field before generating the AI evaluation')
 
-        prompt = _prompt_for_ai_evaluation(
-            ai_participant.ai_persona_role or 'domain specialist',
-            ai_participant.ai_persona_description,
-            context_text,
+        # Other specialists' roles (never their scores) keep each evaluation focused on
+        # what its own expertise adds; the assessment itself stays blind.
+        other_roles = [
+            p.ai_persona_role
+            for p in self.participant_repo.list_ai_specialists(run_id)
+            if p.id != ai_participant.id
+        ]
+        system = build_system_instruction(
+            Persona(
+                role_title=ai_participant.ai_persona_role or 'domain specialist',
+                role_description=ai_participant.ai_persona_description,
+            ),
+            other_roles,
         )
         raw = self.llm_client.generate_json(
-            prompt, schema=PHASE4_AI_EVALUATION_SCHEMA, schema_name='phase4_ai_evaluation'
+            _prompt_for_ai_evaluation(context_text),
+            schema=PHASE4_AI_EVALUATION_SCHEMA,
+            schema_name='phase4_ai_evaluation',
+            system=system,
         )
 
         scores_out: dict[str, dict] = {}
