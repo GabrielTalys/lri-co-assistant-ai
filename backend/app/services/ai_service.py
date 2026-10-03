@@ -13,6 +13,7 @@ from app.models import AISuggestionStatus
 from app.repositories import AISuggestionRepository, CanvasRepository, ParticipantRepository, RunRepository
 from app.services.ai_prompts import (
     DEFAULT_PERSONA,
+    ENGLISH_ONLY_RULE,
     PANEL_MODERATOR_INSTRUCTION,
     Persona,
     build_system_instruction,
@@ -88,8 +89,8 @@ def _phase3_overview_schema(field_ids: list[str]) -> dict:
 
 
 class AISuggestionService:
-    PROMPT_VERSION = 'phase1-recommendations-v5'
-    PHASE3_OVERVIEW_PROMPT_VERSION = 'phase3-overview-v2'
+    PROMPT_VERSION = 'phase1-recommendations-v6'
+    PHASE3_OVERVIEW_PROMPT_VERSION = 'phase3-overview-v3'
 
     def __init__(self, db: Session):
         self.db = db
@@ -163,6 +164,7 @@ class AISuggestionService:
             'contexts, tools and constraints they wrote, never a generic template that would fit '
             'any project.\n'
             'Keep the answer concise, ideally around 100 to 150 words.\n'
+            f'{ENGLISH_ONLY_RULE}\n'
             'Do not prepend the field name, canvas key, labels, headings, bullets, or quotes.\n'
             'Do not mention any other field names in the opening of the answer.\n'
             'Do not begin with introductory framing or by restating the prompt.\n'
@@ -193,6 +195,7 @@ class AISuggestionService:
             'across fields; when a field is already solid from your perspective, say why briefly and '
             'suggest only what would still add value.\n'
             'Do not rewrite the field as final text to be pasted back, and do not use markdown.\n'
+            f'{ENGLISH_ONLY_RULE}\n'
             'Respond only with JSON matching the required schema.'
         )
 
@@ -266,9 +269,10 @@ class AISuggestionService:
             'same suggestion.\n'
             'When every specialist shares a point, refer to them together as the panel instead of '
             'listing every role title; name individual specialists in the text only to tell their '
-            'positions apart.\n'
-            'Write every text value (consensus, divergence and suggestions) in the language of the '
-            'canvas, even though these instructions are in English.\n'
+            'positions apart, by their role in English (for example "the sales specialist"), never '
+            'by their JSON key.\n'
+            f'{ENGLISH_ONLY_RULE} This applies to every text value (consensus, divergence and '
+            'suggestions).\n'
             'Keep each field within about 90 to 150 words in total.\n'
             'Respond only with JSON matching the required schema.'
         )

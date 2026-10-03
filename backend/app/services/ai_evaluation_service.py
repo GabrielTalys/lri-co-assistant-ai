@@ -3,7 +3,7 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from app.repositories import CanvasRepository, InviteRepository, ParticipantRepository, RunRepository, ScoreRepository
-from app.services.ai_prompts import Persona, build_system_instruction
+from app.services.ai_prompts import ENGLISH_ONLY_RULE, Persona, build_system_instruction
 from app.services.canvas_context import build_canvas_context
 from app.services.llm_client import get_llm_client
 from app.services.score_service import ScoreService
@@ -49,6 +49,7 @@ def _prompt_for_ai_evaluation(context_text: str) -> str:
         'For every metric write a comment of 2 to 4 sentences that justifies the score from your '
         'specialist perspective: point to the specific canvas content that drove the score, explain '
         'it with knowledge from your domain, and name the single change that would raise the score.\n'
+        f'{ENGLISH_ONLY_RULE}\n'
         'Respond only with JSON matching the required schema.'
     )
 

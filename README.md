@@ -70,7 +70,8 @@ in the workshop.
   human-only.
 - All AI prompts share quality rules: answers must be grounded in what the
   team wrote, bring role-specific knowledge, avoid generic filler, never
-  invent facts about the team's context, and use the canvas language.
+  invent facts about the team's context, and are always written in English,
+  whatever language the canvas or the specialist roles are written in.
 - The facilitator can reopen completed phases in **read-only** mode from the
   "LRI Phases" sidebar.
 
