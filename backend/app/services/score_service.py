@@ -1,28 +1,37 @@
 from collections import defaultdict
 
-from app.domain.metrics import METRICS
+from sqlalchemy.orm import Session
+
+from app.domain.metrics import ASSESSMENT_METRICS
 from app.repositories import InviteRepository, ParticipantRepository, RunRepository, ScoreRepository
+from app.services.guards import get_run, get_run_participant
 
 
 def _capitalize_name(value: str | None) -> str:
-    text = (value or '').strip()
-    if not text:
-        return ''
-    return ' '.join(part.capitalize() for part in text.split())
+    return ' '.join(part.capitalize() for part in (value or '').split())
+
+
+def _median(values: list[int]) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    mid = len(ordered) // 2
+    if len(ordered) % 2 == 1:
+        return float(ordered[mid])
+    return (ordered[mid - 1] + ordered[mid]) / 2
 
 
 class ScoreService:
-    def __init__(
-        self,
-        run_repo: RunRepository,
-        participant_repo: ParticipantRepository,
-        score_repo: ScoreRepository,
-        invite_repo: InviteRepository,
-    ):
-        self.run_repo = run_repo
-        self.participant_repo = participant_repo
-        self.score_repo = score_repo
-        self.invite_repo = invite_repo
+    def __init__(self, db: Session):
+        self.run_repo = RunRepository(db)
+        self.participant_repo = ParticipantRepository(db)
+        self.score_repo = ScoreRepository(db)
+        self.invite_repo = InviteRepository(db)
+
+    def _participant_rows(self, run_id: int, participant_id: int):
+        run = get_run(self.run_repo, run_id)
+        get_run_participant(self.participant_repo, run_id, participant_id)
+        return self.score_repo.list_by_participant(run_id=run_id, participant_id=participant_id, cycle=run.current_cycle)
 
     def submit_score(
         self,
@@ -32,15 +41,10 @@ class ScoreService:
         value: int,
         comment: str | None = None,
     ):
-        run = self.run_repo.get(run_id)
-        if run is None:
-            raise ValueError('Run not found')
+        run = get_run(self.run_repo, run_id)
+        get_run_participant(self.participant_repo, run_id, participant_id)
 
-        participant = self.participant_repo.get(participant_id)
-        if participant is None or participant.run_id != run_id:
-            raise ValueError('Participant not found for this run')
-
-        if metric_key not in METRICS:
+        if metric_key not in ASSESSMENT_METRICS:
             raise ValueError('Unsupported metric key')
 
         if value < 1 or value > 7:
@@ -66,51 +70,32 @@ class ScoreService:
         )
 
     def get_aggregates(self, run_id: int) -> dict:
-        run = self.run_repo.get(run_id)
-        if run is None:
-            raise ValueError('Run not found')
+        run = get_run(self.run_repo, run_id)
 
-        ai_participant_ids = {
-            p.id for p in self.participant_repo.list_by_run(run_id) if p.is_ai
-        }
-        all_scores = self.score_repo.list_by_run(run_id, cycle=run.current_cycle)
+        ai_participant_ids = {p.id for p in self.participant_repo.list_by_run(run_id) if p.is_ai}
 
         # The AI specialists' evaluations are shown separately (see get_ai_evaluations)
         # and must never influence the consolidated numbers that drive the human
         # GO/PIVOT/ABORT decision.
         values_by_metric: dict[str, list[int]] = defaultdict(list)
-        for score in all_scores:
-            if score.participant_id in ai_participant_ids:
-                continue
-            values_by_metric[score.metric_key].append(score.value)
+        for score in self.score_repo.list_by_run(run_id, cycle=run.current_cycle):
+            if score.participant_id not in ai_participant_ids:
+                values_by_metric[score.metric_key].append(score.value)
 
         out = {}
-        for metric in METRICS:
+        for metric in ASSESSMENT_METRICS:
             rows = values_by_metric.get(metric, [])
-            avg = (sum(rows) / len(rows)) if rows else 0.0
-            rows_sorted = sorted(rows)
-            median = 0.0
-            if rows_sorted:
-                mid = len(rows_sorted) // 2
-                if len(rows_sorted) % 2 == 1:
-                    median = float(rows_sorted[mid])
-                else:
-                    median = (rows_sorted[mid - 1] + rows_sorted[mid]) / 2
             out[metric] = {
-                'avg': avg,
-                'median': median,
+                'avg': (sum(rows) / len(rows)) if rows else 0.0,
+                'median': _median(rows),
                 'count': len(rows),
                 'distribution': {str(n): rows.count(n) for n in range(1, 8)},
             }
-
         return out
 
     def get_completion(self, run_id: int) -> dict[str, int | bool]:
-        run = self.run_repo.get(run_id)
-        if run is None:
-            raise ValueError('Run not found')
+        run = get_run(self.run_repo, run_id)
 
-        required_metrics = {'impact', 'feasibility', 'alignment'}
         participants = self.participant_repo.list_by_run(run_id)
         # AI specialists never block or count toward the human completion gate.
         respondents = [p for p in participants if p.role != 'facilitator' and not p.is_ai]
@@ -118,12 +103,12 @@ class ScoreService:
 
         metrics_by_participant: dict[int, set[str]] = defaultdict(set)
         for score in self.score_repo.list_by_run(run_id, cycle=run.current_cycle):
-            if score.participant_id not in respondent_ids:
-                continue
-            if score.metric_key in required_metrics:
+            if score.participant_id in respondent_ids and score.metric_key in ASSESSMENT_METRICS:
                 metrics_by_participant[score.participant_id].add(score.metric_key)
 
-        completed = sum(1 for p in respondents if required_metrics.issubset(metrics_by_participant.get(p.id, set())))
+        completed = sum(
+            1 for p in respondents if set(ASSESSMENT_METRICS).issubset(metrics_by_participant.get(p.id, set()))
+        )
         pending_invites = self.invite_repo.count_pending_by_run(run_id)
         required = len(respondents) + pending_invites
         all_done = completed >= required if required > 0 else True
@@ -136,32 +121,19 @@ class ScoreService:
         }
 
     def get_participant_scores(self, run_id: int, participant_id: int) -> dict[str, int]:
-        run = self.run_repo.get(run_id)
-        if run is None:
-            raise ValueError('Run not found')
-        participant = self.participant_repo.get(participant_id)
-        if participant is None or participant.run_id != run_id:
-            raise ValueError('Participant not found for this run')
-        rows = self.score_repo.list_by_participant(run_id=run_id, participant_id=participant_id, cycle=run.current_cycle)
-        return {row.metric_key: row.value for row in rows}
+        return {row.metric_key: row.value for row in self._participant_rows(run_id, participant_id)}
 
     def get_participant_comments(self, run_id: int, participant_id: int) -> dict[str, str]:
-        run = self.run_repo.get(run_id)
-        if run is None:
-            raise ValueError('Run not found')
-        participant = self.participant_repo.get(participant_id)
-        if participant is None or participant.run_id != run_id:
-            raise ValueError('Participant not found for this run')
-        rows = self.score_repo.list_by_participant(run_id=run_id, participant_id=participant_id, cycle=run.current_cycle)
-        return {row.metric_key: row.comment for row in rows if (row.comment or '').strip()}
+        return {
+            row.metric_key: row.comment
+            for row in self._participant_rows(run_id, participant_id)
+            if (row.comment or '').strip()
+        }
 
     def get_comments_by_participant(self, run_id: int) -> list[dict]:
-        run = self.run_repo.get(run_id)
-        if run is None:
-            raise ValueError('Run not found')
+        run = get_run(self.run_repo, run_id)
 
-        participants = {p.id: p for p in self.participant_repo.list_by_run(run_id)}
-        ai_participant_ids = {pid for pid, p in participants.items() if p.is_ai}
+        ai_participant_ids = {p.id for p in self.participant_repo.list_by_run(run_id) if p.is_ai}
         invite_name_by_participant: dict[int, str] = {}
         for invite in self.invite_repo.list_by_run(run_id):
             participant_id = invite.accepted_participant_id
@@ -170,10 +142,9 @@ class ScoreService:
             assigned_name = (invite.participant_name or invite.invitee_name or '').strip()
             if assigned_name:
                 invite_name_by_participant[participant_id] = assigned_name
-        rows = self.score_repo.list_by_run(run_id, cycle=run.current_cycle)
 
         grouped: dict[int, dict] = {}
-        for row in rows:
+        for row in self.score_repo.list_by_run(run_id, cycle=run.current_cycle):
             # Each AI specialist gets its own dedicated card (get_ai_evaluations),
             # never mixed into the generic human comments grid.
             if row.participant_id in ai_participant_ids:
@@ -186,7 +157,6 @@ class ScoreService:
                 _capitalize_name(invite_name_by_participant.get(row.participant_id))
                 or f'Participant {row.participant_id}'
             )
-
             entry = grouped.setdefault(
                 row.participant_id,
                 {
@@ -200,12 +170,8 @@ class ScoreService:
         return sorted(grouped.values(), key=lambda item: str(item.get('participant_label', '')).lower())
 
     def reset_participant_scores(self, run_id: int, participant_id: int) -> int:
-        run = self.run_repo.get(run_id)
-        if run is None:
-            raise ValueError('Run not found')
-        participant = self.participant_repo.get(participant_id)
-        if participant is None or participant.run_id != run_id:
-            raise ValueError('Participant not found for this run')
+        run = get_run(self.run_repo, run_id)
+        get_run_participant(self.participant_repo, run_id, participant_id)
         return self.score_repo.delete_by_participant(
             run_id=run_id,
             participant_id=participant_id,
@@ -213,9 +179,7 @@ class ScoreService:
         )
 
     def get_ai_evaluations(self, run_id: int) -> list[dict]:
-        run = self.run_repo.get(run_id)
-        if run is None:
-            raise ValueError('Run not found')
+        run = get_run(self.run_repo, run_id)
 
         evaluations = []
         for ai_participant in self.participant_repo.list_ai_specialists(run_id):
@@ -229,7 +193,7 @@ class ScoreService:
                     'role_title': ai_participant.ai_persona_role,
                     'role_description': ai_participant.ai_persona_description,
                     'scores': scores,
-                    'is_complete': {'impact', 'feasibility', 'alignment'}.issubset(scores),
+                    'is_complete': set(ASSESSMENT_METRICS).issubset(scores),
                 }
             )
         return evaluations

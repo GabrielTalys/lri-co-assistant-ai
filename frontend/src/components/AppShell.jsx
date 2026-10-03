@@ -1,6 +1,5 @@
 import React from "react";
 import { Link, useLocation } from "react-router-dom";
-import logoPUC from "../img/logoPUC.png";
 
 export default function AppShell({
   user,
@@ -20,7 +19,6 @@ export default function AppShell({
             <span className="brand">LRI Tool</span>
           ) : (
             <div>
-              {}
               <Link className="brand" to="/dashboard">
                 LRI Co-Assistant
               </Link>

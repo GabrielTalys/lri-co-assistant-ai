@@ -1,7 +1,10 @@
 import secrets
 
+from sqlalchemy.orm import Session
+
 from app.models import Participant
 from app.repositories import ParticipantRepository, RunRepository, ScoreRepository
+from app.services.guards import get_ai_run, get_owned_run
 
 MAX_AI_SPECIALISTS = 3
 # Mirrors the participants.ai_persona_role / ai_persona_description column sizes.
@@ -17,29 +20,19 @@ class AISpecialistService:
     A run can have up to MAX_AI_SPECIALISTS of them, each with its own role.
     """
 
-    def __init__(
-        self,
-        run_repo: RunRepository,
-        participant_repo: ParticipantRepository,
-        score_repo: ScoreRepository,
-    ):
-        self.run_repo = run_repo
-        self.participant_repo = participant_repo
-        self.score_repo = score_repo
-
-    def _get_owned_run(self, run_id: int, owner_user_id: int):
-        run = self.run_repo.get(run_id)
-        if run is None or run.owner_user_id != owner_user_id:
-            raise ValueError('Run not found')
-        return run
+    def __init__(self, db: Session):
+        self.run_repo = RunRepository(db)
+        self.participant_repo = ParticipantRepository(db)
+        self.score_repo = ScoreRepository(db)
 
     def _get_editable_run(self, run_id: int, owner_user_id: int):
-        run = self._get_owned_run(run_id, owner_user_id)
-        if not run.ai_mode_enabled:
-            raise ValueError('AI mode is disabled for this project')
-        if run.current_phase != 2:
-            raise ValueError('AI specialists can only be configured in phase 2')
-        return run
+        return get_ai_run(
+            self.run_repo,
+            run_id,
+            phase=2,
+            phase_error='AI specialists can only be configured in phase 2',
+            owner_user_id=owner_user_id,
+        )
 
     def _get_specialist(self, run_id: int, specialist_id: int) -> Participant:
         specialist = self.participant_repo.get_ai_specialist(run_id, specialist_id)
@@ -112,7 +105,7 @@ class AISpecialistService:
         )
 
     def remove(self, run_id: int, owner_user_id: int, specialist_id: int) -> None:
-        run = self._get_owned_run(run_id, owner_user_id)
+        run = get_owned_run(self.run_repo, run_id, owner_user_id)
         if run.current_phase != 2:
             raise ValueError('AI specialists can only be removed in phase 2')
 

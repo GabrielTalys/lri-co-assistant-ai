@@ -79,11 +79,6 @@ a {
   margin: 0 auto;
 }
 
-.breadcrumbs {
-  margin-bottom: 12px;
-  font-size: 14px;
-}
-
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -200,16 +195,6 @@ h3 {
   color: #fff;
 }
 
-.btn-danger {
-  background: #c62828;
-  color: #fff;
-  border-color: #a81f1f;
-}
-
-.btn-danger:hover {
-  background: #a81f1f;
-}
-
 .btn-sm {
   padding: 7px 10px;
   font-size: 13px;
@@ -289,10 +274,6 @@ textarea {
   min-width: 0;
 }
 
-.project-row-info {
-  min-width: 0;
-}
-
 .project-title {
   font-size: 22px;
   line-height: 1.25;
@@ -327,10 +308,6 @@ textarea {
   border-radius: 999px;
   background: #e8edfb;
   overflow: hidden;
-}
-
-.mt-2 {
-  margin-top: 8px;
 }
 
 .project-progress-fill {
@@ -538,15 +515,6 @@ button.phase-item {
   padding: 4px 10px;
 }
 
-.metadata-card {
-  border: 1px solid var(--border);
-  background: #fafcff;
-  border-radius: 12px;
-  padding: 12px;
-  display: grid;
-  gap: 6px;
-}
-
 .action-divider {
   border-top: 1px solid var(--border);
   margin: 16px 0 12px;
@@ -561,10 +529,6 @@ button.phase-item {
 
 .primary-group .btn-primary {
   min-width: 220px;
-}
-
-.confirm-row {
-  margin-top: 8px;
 }
 
 .invite-card {
@@ -905,27 +869,6 @@ button.phase-item {
   margin: 4px 0 0;
   color: var(--muted);
   font-size: 14px;
-}
-
-.overall-assessment {
-  margin-top: 18px;
-  padding: 8px 0 2px;
-}
-
-.overall-assessment-label {
-  margin: 0;
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: #637191;
-  font-weight: 600;
-}
-
-.overall-assessment-text {
-  margin: 4px 0 0;
-  font-size: 14px;
-  color: #253a66;
-  font-weight: 600;
 }
 
 .decision-section {

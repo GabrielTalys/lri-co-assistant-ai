@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { api } from './services/api';
+import { readParticipantSession } from './services/participantSession';
 import AppShell from './components/AppShell';
 import DashboardPage from './pages/DashboardPage';
 import InvitePage from './pages/InvitePage';
@@ -31,15 +32,10 @@ function AppRoutes() {
   const [me, setMe] = useState(null);
   const [checkingAuth, setCheckingAuth] = useState(Boolean(token));
 
-  const participantSession = useMemo(() => {
-    const raw = localStorage.getItem('participant');
-    if (!raw) return null;
-    try {
-      return JSON.parse(raw);
-    } catch {
-      return null;
-    }
-  }, [location.pathname, location.search]);
+  const participantSession = useMemo(readParticipantSession, [
+    location.pathname,
+    location.search,
+  ]);
 
   useEffect(() => {
     if (!token) {

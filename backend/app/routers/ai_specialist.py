@@ -1,10 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user, get_optional_current_user
+from app.api.deps import ensure_run_access, get_current_user, get_optional_current_user
 from app.db.session import get_db
 from app.models import User
-from app.repositories import ParticipantRepository, RunRepository, ScoreRepository
 from app.schemas.common import (
     AIEvaluationResponse,
     AISpecialistDeleteResponse,
@@ -16,32 +15,6 @@ from app.services.ai_evaluation_service import AIEvaluationService
 from app.services.ai_specialist_service import MAX_AI_SPECIALISTS, AISpecialistService
 
 router = APIRouter(tags=['ai-specialist'])
-
-
-def _service(db: Session) -> AISpecialistService:
-    return AISpecialistService(
-        run_repo=RunRepository(db),
-        participant_repo=ParticipantRepository(db),
-        score_repo=ScoreRepository(db),
-    )
-
-
-def _ensure_run_access(
-    run_id: int,
-    db: Session,
-    current_user: User | None = None,
-    participant_id: int | None = None,
-) -> None:
-    run = RunRepository(db).get(run_id)
-    if run is None:
-        raise HTTPException(status_code=404, detail='Run not found')
-    if current_user is not None and run.owner_user_id == current_user.id:
-        return
-    if participant_id is None:
-        raise HTTPException(status_code=401, detail='Unauthorized')
-    participant = ParticipantRepository(db).get(participant_id)
-    if participant is None or participant.run_id != run_id:
-        raise HTTPException(status_code=404, detail='Run not found')
 
 
 def _http_error(exc: ValueError) -> HTTPException:
@@ -58,7 +31,6 @@ def _to_out(participant) -> AISpecialistOut:
     )
 
 
-@router.get('/runs/{run_id}/ai-specialists', response_model=AISpecialistListOut)
 @router.get('/projects/{run_id}/ai-specialists', response_model=AISpecialistListOut)
 def list_ai_specialists(
     run_id: int,
@@ -66,15 +38,14 @@ def list_ai_specialists(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_optional_current_user),
 ):
-    _ensure_run_access(run_id=run_id, db=db, current_user=current_user, participant_id=participant_id)
-    specialists = _service(db).list_specialists(run_id)
+    ensure_run_access(run_id=run_id, db=db, current_user=current_user, participant_id=participant_id)
+    specialists = AISpecialistService(db).list_specialists(run_id)
     return AISpecialistListOut(
         items=[_to_out(specialist) for specialist in specialists],
         max_specialists=MAX_AI_SPECIALISTS,
     )
 
 
-@router.post('/runs/{run_id}/ai-specialists', response_model=AISpecialistOut)
 @router.post('/projects/{run_id}/ai-specialists', response_model=AISpecialistOut)
 def create_ai_specialist(
     run_id: int,
@@ -83,7 +54,7 @@ def create_ai_specialist(
     current_user: User = Depends(get_current_user),
 ):
     try:
-        participant = _service(db).create(
+        participant = AISpecialistService(db).create(
             run_id=run_id,
             owner_user_id=current_user.id,
             role_title=payload.role_title,
@@ -96,7 +67,6 @@ def create_ai_specialist(
     return _to_out(participant)
 
 
-@router.put('/runs/{run_id}/ai-specialists/{specialist_id}', response_model=AISpecialistOut)
 @router.put('/projects/{run_id}/ai-specialists/{specialist_id}', response_model=AISpecialistOut)
 def update_ai_specialist(
     run_id: int,
@@ -106,7 +76,7 @@ def update_ai_specialist(
     current_user: User = Depends(get_current_user),
 ):
     try:
-        participant = _service(db).update(
+        participant = AISpecialistService(db).update(
             run_id=run_id,
             owner_user_id=current_user.id,
             specialist_id=specialist_id,
@@ -120,7 +90,6 @@ def update_ai_specialist(
     return _to_out(participant)
 
 
-@router.delete('/runs/{run_id}/ai-specialists/{specialist_id}', response_model=AISpecialistDeleteResponse)
 @router.delete('/projects/{run_id}/ai-specialists/{specialist_id}', response_model=AISpecialistDeleteResponse)
 def delete_ai_specialist(
     run_id: int,
@@ -129,7 +98,7 @@ def delete_ai_specialist(
     current_user: User = Depends(get_current_user),
 ):
     try:
-        _service(db).remove(run_id=run_id, owner_user_id=current_user.id, specialist_id=specialist_id)
+        AISpecialistService(db).remove(run_id=run_id, owner_user_id=current_user.id, specialist_id=specialist_id)
     except ValueError as exc:
         raise _http_error(exc) from exc
 
@@ -137,7 +106,6 @@ def delete_ai_specialist(
     return AISpecialistDeleteResponse(ok=True)
 
 
-@router.post('/runs/{run_id}/ai-specialists/{specialist_id}/evaluate', response_model=AIEvaluationResponse)
 @router.post('/projects/{run_id}/ai-specialists/{specialist_id}/evaluate', response_model=AIEvaluationResponse)
 def evaluate_ai_specialist(
     run_id: int,

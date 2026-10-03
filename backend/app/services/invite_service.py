@@ -1,21 +1,19 @@
 from datetime import datetime, timedelta
 
+from sqlalchemy.orm import Session
+
 from app.core.config import settings
 from app.core.security import create_invite_token, hash_token
 from app.models import InviteStatus
 from app.repositories import InviteRepository, ParticipantRepository, RunRepository
+from app.services.guards import get_owned_run
 
 
 class InviteService:
-    def __init__(
-        self,
-        run_repo: RunRepository,
-        invite_repo: InviteRepository,
-        participant_repo: ParticipantRepository,
-    ):
-        self.run_repo = run_repo
-        self.invite_repo = invite_repo
-        self.participant_repo = participant_repo
+    def __init__(self, db: Session):
+        self.run_repo = RunRepository(db)
+        self.invite_repo = InviteRepository(db)
+        self.participant_repo = ParticipantRepository(db)
 
     def create_invite(
         self,
@@ -24,9 +22,7 @@ class InviteService:
         role: str = 'collaborator',
         invitee_name: str | None = None,
     ):
-        run = self.run_repo.get(run_id)
-        if run is None or run.owner_user_id != owner_user_id:
-            raise ValueError('Run not found')
+        run = get_owned_run(self.run_repo, run_id, owner_user_id)
         if run.current_phase != 2:
             raise ValueError('Invites can only be generated in phase 2')
         if run.current_cycle > 1:
@@ -46,9 +42,7 @@ class InviteService:
         return raw_token, invite
 
     def list_invites(self, run_id: int, owner_user_id: int):
-        run = self.run_repo.get(run_id)
-        if run is None or run.owner_user_id != owner_user_id:
-            raise ValueError('Run not found')
+        get_owned_run(self.run_repo, run_id, owner_user_id)
         return self.invite_repo.list_by_run(run_id)
 
     def inspect_invite(self, raw_token: str):

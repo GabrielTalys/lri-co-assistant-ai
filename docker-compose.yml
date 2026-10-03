@@ -18,12 +18,9 @@ services:
       context: ./backend
     environment:
       DATABASE_URL: postgresql://lri:lri@db:5432/lri
-      AUTH_MODE: local
       JWT_SECRET: ${JWT_SECRET:-dev-secret}
       JWT_EXPIRES_MINUTES: 240
       INVITE_EXPIRATION_DAYS: 7
-      AI_POLL_INTERVAL_SECONDS: 2
-      AI_JOB_TIMEOUT_SECONDS: 30
       LLM_PROVIDER: ${LLM_PROVIDER:-gemini}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.6-flash}
@@ -42,32 +39,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
-
-  worker:
-    build:
-      context: ./backend
-    environment:
-      DATABASE_URL: postgresql://lri:lri@db:5432/lri
-      AUTH_MODE: local
-      JWT_SECRET: ${JWT_SECRET:-dev-secret}
-      AI_JOB_TIMEOUT_SECONDS: 30
-      LLM_PROVIDER: ${LLM_PROVIDER:-gemini}
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.6-flash}
-      GEMINI_FALLBACK_MODEL: ${GEMINI_FALLBACK_MODEL-gemini-3.5-flash-lite}
-      GEMINI_RETRY_ATTEMPTS: ${GEMINI_RETRY_ATTEMPTS:-4}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
-      LLM_TIMEOUT_SECONDS: 20
-    volumes:
-      - ./backend:/app
-      - ./scripts:/scripts
-    command: ["/scripts/start-worker.sh"]
-    depends_on:
-      db:
-        condition: service_healthy
-      backend:
-        condition: service_started
 
   frontend:
     image: node:20-alpine

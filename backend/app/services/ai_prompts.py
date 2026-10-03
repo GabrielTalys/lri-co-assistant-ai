@@ -98,3 +98,17 @@ def build_system_instruction(persona: Persona, other_roles: list[str] | None = N
     lines.append('')
     lines.append(QUALITY_RULES)
     return '\n'.join(lines)
+
+
+def specialist_system_instruction(specialist, specialists) -> str:
+    """System prompt of one configured AI specialist (a Participant row) on the run's panel.
+
+    The other specialists' roles (never their answers) keep each one focused on what
+    its own expertise adds.
+    """
+    persona = Persona(
+        role_title=specialist.ai_persona_role or 'domain specialist',
+        role_description=specialist.ai_persona_description,
+    )
+    other_roles = [p.ai_persona_role for p in specialists if p.id != specialist.id]
+    return build_system_instruction(persona, other_roles)

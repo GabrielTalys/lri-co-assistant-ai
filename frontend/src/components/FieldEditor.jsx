@@ -1,6 +1,4 @@
-import React from "react";
-import { useEffect, useState } from "react";
-import { getFieldLabel, getFieldPlaceholder } from "../utils/placeholder";
+import React, { useEffect, useState } from "react";
 
 function formatSuggestionText(field, text) {
   const normalized = String(text || "").trim();
@@ -23,9 +21,10 @@ function formatSuggestionText(field, text) {
 
 export default function FieldEditor({
   field,
+  label,
+  placeholder,
   value,
   onChange,
-  onConfirm,
   suggestion,
   aiOverviews,
   aiOverviewPending,
@@ -34,8 +33,6 @@ export default function FieldEditor({
   onDismissOverview,
   pending,
   readOnly,
-  labelOverride,
-  placeholderOverride,
 }) {
   const [draft, setDraft] = useState(value || "");
   const [hasInteracted, setHasInteracted] = useState(Boolean((value || "").trim().length));
@@ -47,9 +44,6 @@ export default function FieldEditor({
     }
   }, [value]);
 
-  const label = labelOverride || getFieldLabel(field);
-  const placeholder =
-    hasInteracted ? "" : (placeholderOverride ?? getFieldPlaceholder(field));
   const formattedSuggestionText = formatSuggestionText(
     field,
     suggestion?.suggested_text
@@ -69,25 +63,16 @@ export default function FieldEditor({
         readOnly={readOnly}
         onChange={(e) => {
           if (readOnly) return;
-          if (typeof onChange !== "function") return;
           setHasInteracted(true);
           setDraft(e.target.value);
           onChange(field, e.target.value);
         }}
         onBlur={() => {
           if (readOnly) return;
-          if (typeof onChange !== "function") return;
-          onChange(field, draft, true);
+          onChange(field, draft);
         }}
-        placeholder={placeholder}
+        placeholder={hasInteracted ? "" : placeholder}
       />
-      {onConfirm && (
-        <div className="confirm-row">
-          <button className="btn btn-secondary btn-sm" onClick={() => onConfirm(field, draft)}>
-            Confirm response
-          </button>
-        </div>
-      )}
       {pending && <p className="hint">Suggestion pending...</p>}
       {!readOnly && suggestion && (
         <div className="suggestion-inline suggestion-inline-ai">

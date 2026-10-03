@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, Field
 
 
 class LoginRequest(BaseModel):
@@ -35,17 +35,6 @@ class RunOut(BaseModel):
     decision: str | None = None
     invite_links_generated: bool = False
     created_at: datetime | None = None
-    createdAt: datetime | None = None
-
-    model_config = ConfigDict(from_attributes=True)
-
-    @model_validator(mode='after')
-    def populate_legacy_created_at(self):
-        if self.createdAt is None:
-            self.createdAt = self.created_at
-        if self.created_at is None:
-            self.created_at = self.createdAt
-        return self
 
 
 class RunDeleteResponse(BaseModel):
@@ -103,13 +92,6 @@ class CanvasWriteRequest(BaseModel):
     content: str
 
 
-class CanvasRecommendationsResponse(BaseModel):
-    generated_count: int
-    filled_count: int
-    empty_count: int
-    suggestions: dict[str, dict[str, str | None]]
-
-
 class CanvasSingleRecommendationResponse(BaseModel):
     question_key: str
     suggested_text: str
@@ -128,16 +110,6 @@ class Phase3OverviewResponse(BaseModel):
     overviews: dict[str, str]
     # 'default' (methodologist persona), 'specialist' (one AI specialist) or 'panel'
     # (several specialists consolidated; their individual reviews are in `perspectives`).
-    mode: str = 'default'
-    specialist_id: int | None = None
-    role_title: str | None = None
-    perspectives: list[Phase3Perspective] = Field(default_factory=list)
-    failed_specialists: list[str] = Field(default_factory=list)
-
-
-class Phase3SingleOverviewResponse(BaseModel):
-    question_key: str
-    overview_text: str
     mode: str = 'default'
     specialist_id: int | None = None
     role_title: str | None = None
@@ -192,68 +164,9 @@ class ScoreResetResponse(BaseModel):
     deleted_count: int = 0
 
 
-# Compatibility DTOs for /projects and /invite (legacy frontend contract)
-class ProjectCreate(BaseModel):
-    title: str
-
-
-class ProjectOut(BaseModel):
-    id: int
-    title: str
-    current_phase: str
-    current_cycle: int
-
-
-class JoinInviteRequest(BaseModel):
-    name: str
-    company: str
-    consent: bool = Field(default=False)
-
-
-class JoinInviteResponse(BaseModel):
-    participant_id: int
-    project_id: int
-
-
-class PhaseEntryPatch(BaseModel):
-    actor_type: str
-    actor_id: int
-    field_key: str
-    content: str
-
-
-class PhaseEntryPatchResponse(BaseModel):
-    entry_version: int
-    ai_job_id: int | None = None
-
-
-class AIJobStatusOut(BaseModel):
-    id: int
-    status: str
-    job_type: str
-    fallback_used: bool
-    error_message: str | None = None
-
-
-class AssessmentStartRequest(BaseModel):
-    participants: list[int]
-
-
-class AssessmentScoreRequest(BaseModel):
-    actor_type: str
-    actor_id: int
-    criterion: str
-    score: int
-    justification: str | None = None
-
-
 class DecisionRequest(BaseModel):
     decision: str
     justification: str | None = None
-
-
-class SummaryGenerateResponse(BaseModel):
-    job_id: int
 
 
 class ExportOut(BaseModel):

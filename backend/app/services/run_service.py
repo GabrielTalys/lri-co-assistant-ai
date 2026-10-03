@@ -1,6 +1,10 @@
+from sqlalchemy.orm import Session
+
 from app.domain.phases import advance_phase
 from app.models.enums import RunStatus
 from app.repositories import CanvasRepository, InviteRepository, ParticipantRepository, RunRepository
+from app.services.canvas_context import build_canvas_context, response_cycle_for_run
+from app.services.guards import get_owned_run
 
 
 class PhaseAdvanceBlockedError(ValueError):
@@ -8,50 +12,21 @@ class PhaseAdvanceBlockedError(ValueError):
 
 
 class RunService:
-    def __init__(
-        self,
-        run_repo: RunRepository,
-        participant_repo: ParticipantRepository,
-        invite_repo: InviteRepository,
-        canvas_repo: CanvasRepository,
-    ):
-        self.run_repo = run_repo
-        self.participant_repo = participant_repo
-        self.invite_repo = invite_repo
-        self.canvas_repo = canvas_repo
-
-    def _response_cycle_for_run(self, run) -> int:
-        if run.current_phase != 2 or run.current_cycle <= 1:
-            return run.current_cycle
-
-        for cycle in range(run.current_cycle - 1, 0, -1):
-            if self.canvas_repo.list_responses_by_run(run.id, cycle=cycle):
-                return cycle
-        return max(1, run.current_cycle - 1)
+    def __init__(self, db: Session):
+        self.run_repo = RunRepository(db)
+        self.participant_repo = ParticipantRepository(db)
+        self.invite_repo = InviteRepository(db)
+        self.canvas_repo = CanvasRepository(db)
 
     def _has_empty_canvas_fields(self, run) -> bool:
         if run.current_phase > 3:
             return False
-
-        questions = self.canvas_repo.list_questions()
-        if not questions:
-            return False
-
-        cycle = self._response_cycle_for_run(run)
-        responses = {
-            response.question_id: response
-            for response in self.canvas_repo.list_responses_by_run(run.id, cycle=cycle)
-        }
-
-        for question in questions:
-            response = responses.get(question.id)
-            content = (response.content or '').strip() if response else ''
-            if not content:
-                return True
-        return False
+        cycle = response_cycle_for_run(self.canvas_repo, run)
+        _, empty_questions, _ = build_canvas_context(self.canvas_repo, run.id, cycle)
+        return bool(empty_questions)
 
     def _copy_canvas_responses_to_current_cycle(self, run) -> None:
-        source_cycle = self._response_cycle_for_run(run)
+        source_cycle = response_cycle_for_run(self.canvas_repo, run)
         if source_cycle == run.current_cycle:
             return
 
@@ -65,23 +40,15 @@ class RunService:
             )
 
     def create_run(self, owner_user_id: int, title: str, ai_mode_enabled: bool = True):
-        run = self.run_repo.create(
-            owner_user_id=owner_user_id,
-            title=title,
-            ai_mode_enabled=ai_mode_enabled,
-        )
-        if not self.participant_repo.find_by_user(run.id, owner_user_id):
-            self.participant_repo.create_with_user(run.id, owner_user_id, role='facilitator')
+        run = self.run_repo.create(owner_user_id=owner_user_id, title=title, ai_mode_enabled=ai_mode_enabled)
+        self.participant_repo.create_with_user(run.id, owner_user_id, role='facilitator')
         return run
 
     def list_runs(self, owner_user_id: int):
         return self.run_repo.list_by_owner(owner_user_id)
 
     def get_owned_run(self, run_id: int, owner_user_id: int):
-        run = self.run_repo.get(run_id)
-        if run is None or run.owner_user_id != owner_user_id:
-            raise ValueError('Run not found')
-        return run
+        return get_owned_run(self.run_repo, run_id, owner_user_id)
 
     def get_run_for_participant(self, run_id: int, participant_id: int):
         run = self.run_repo.get(run_id)
@@ -123,19 +90,19 @@ class RunService:
         )
         return run
 
-    def finalize_run(self, run_id: int, owner_user_id: int):
-        run = self.get_owned_run(run_id=run_id, owner_user_id=owner_user_id)
+    def _get_run_in_phase5(self, run_id: int, owner_user_id: int):
+        run = self.get_owned_run(run_id, owner_user_id)
         if run.current_phase != 5:
             raise ValueError('Decision can only be recorded in phase 5')
-        run.current_phase = max(5, run.current_phase)
+        return run
+
+    def finalize_run(self, run_id: int, owner_user_id: int):
+        run = self._get_run_in_phase5(run_id, owner_user_id)
         self.run_repo.set_status(run, RunStatus.COMPLETED)
         return run
 
     def pivot_run(self, run_id: int, owner_user_id: int):
-        run = self.get_owned_run(run_id=run_id, owner_user_id=owner_user_id)
-        if run.current_phase != 5:
-            raise ValueError('Decision can only be recorded in phase 5')
-
+        run = self._get_run_in_phase5(run_id, owner_user_id)
         self.run_repo.update(run, problem_synthesis='')
         self.run_repo.set_phase(run, 2)
         self.run_repo.set_cycle(run, run.current_cycle + 1)

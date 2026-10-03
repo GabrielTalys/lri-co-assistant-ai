@@ -1,21 +1,15 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
 import { Trash2 } from "lucide-react";
-import { enumToPhaseNumber, phaseLabels } from "../config/phaseConfig";
+import { phaseLabels } from "../config/phaseConfig";
 
 const TOTAL_PHASES = 5;
 
 function resolvePhaseNumber(project) {
-  const phaseFromCurrent = Number(enumToPhaseNumber(project?.current_phase));
-  if (Number.isFinite(phaseFromCurrent) && phaseFromCurrent > 0) {
-    return Math.max(1, Math.min(TOTAL_PHASES, Math.trunc(phaseFromCurrent)));
+  const phase = Number(project?.current_phase);
+  if (Number.isFinite(phase) && phase > 0) {
+    return Math.max(1, Math.min(TOTAL_PHASES, Math.trunc(phase)));
   }
-
-  const phaseFromLegacyStatus = Number(project?.status);
-  if (Number.isFinite(phaseFromLegacyStatus) && phaseFromLegacyStatus > 0) {
-    return Math.max(1, Math.min(TOTAL_PHASES, Math.trunc(phaseFromLegacyStatus)));
-  }
-
   return 1;
 }
 
@@ -84,7 +78,7 @@ function timeAgo(inputDate) {
 }
 
 function formatCreatedAt(project) {
-  const raw = project?.created_at ?? project?.createdAt;
+  const raw = project?.created_at;
   if (!raw) return "Created —";
   const normalized = normalizeTimestamp(raw);
   const date = new Date(normalized);
@@ -126,7 +120,7 @@ export default function ProjectList({ projects, onDeleteProject }) {
             </div>
 
             <div
-              className="project-progress mt-1.5"
+              className="project-progress"
               role="progressbar"
               aria-valuemin={0}
               aria-valuemax={100}
