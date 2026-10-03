@@ -24,11 +24,8 @@ def seed_canvas_questions(db) -> None:
         for question in db.scalars(select(CanvasQuestion)).all()
     }
     for key in CANVAS_KEYS:
-        title = CANVAS_TITLES.get(key, key.replace('_', ' ').title())
-        prompt_template = CANVAS_PROMPT_TEMPLATES.get(
-            key,
-            f'Provide content for {key.replace("_", " ")}.',
-        )
+        title = CANVAS_TITLES[key]
+        prompt_template = CANVAS_PROMPT_TEMPLATES[key]
         existing = existing_questions.get(key)
         if existing:
             existing.title = title

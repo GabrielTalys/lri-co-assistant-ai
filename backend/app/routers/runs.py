@@ -9,17 +9,10 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_optional_current_user
 from app.db.session import get_db
+from app.domain.canvas_keys import CANVAS_KEYS
 from app.models import Decision, Export, RunStatus, User
-from app.repositories import CanvasRepository, InviteRepository, ParticipantRepository, RunRepository, ScoreRepository
-from app.schemas.common import (
-    DecisionRequest,
-    ExportOut,
-    ParticipantOut,
-    RunCreate,
-    RunDeleteResponse,
-    RunOut,
-    RunPatch,
-)
+from app.repositories import CanvasRepository, InviteRepository
+from app.schemas.common import DecisionRequest, ExportOut, ParticipantOut, RunCreate, RunDeleteResponse, RunOut, RunPatch
 from app.services.pdf_service import build_pdf
 from app.services.run_service import PhaseAdvanceBlockedError, RunService
 from app.services.score_service import ScoreService
@@ -27,16 +20,8 @@ from app.services.score_service import ScoreService
 router = APIRouter(tags=['runs'])
 
 ALLOWED_DECISIONS = {'GO', 'ABORT', 'PIVOT'}
-PHASE3_CANVAS_ORDER = [
-    'problem',
-    'stakeholders',
-    'research_questions',
-    'hypotheses',
-    'method',
-    'evaluation',
-    'risks',
-]
-PHASE3_CANVAS_TITLES = {
+# Field headings of the formulated problem in the PDF report (phase 3 wording).
+PDF_CANVAS_TITLES = {
     'problem': 'For the practical problem (what/how/why)',
     'stakeholders': 'Involved in the context (where/when)',
     'research_questions': 'Which bring the following implications / impacts (why)',
@@ -45,41 +30,22 @@ PHASE3_CANVAS_TITLES = {
     'evaluation': 'And we want to investigate - objective (what/how)',
     'risks': 'Answering the following research questions (what)',
 }
-PHASE4_METRIC_ORDER = [
+PDF_METRIC_LABELS = [
     ('impact', 'Value'),
     ('alignment', 'Applicability'),
     ('feasibility', 'Feasibility'),
 ]
-
-
-def _service(db: Session) -> RunService:
-    return RunService(
-        run_repo=RunRepository(db),
-        participant_repo=ParticipantRepository(db),
-        invite_repo=InviteRepository(db),
-        canvas_repo=CanvasRepository(db),
-    )
-
-
-def _score_service(db: Session) -> ScoreService:
-    return ScoreService(
-        run_repo=RunRepository(db),
-        participant_repo=ParticipantRepository(db),
-        score_repo=ScoreRepository(db),
-        invite_repo=InviteRepository(db),
-    )
+EXPORTS_DIR = Path('/app/exports')
 
 
 def _latest_decision_text(run_id: int, cycle: int, db: Session, *, only_final: bool = False) -> str | None:
     stmt = select(Decision.decision).where(Decision.run_id == run_id, Decision.cycle == cycle)
     if only_final:
         stmt = stmt.where(Decision.decision.in_({'GO', 'ABORT'}))
-
     return db.scalar(stmt.order_by(Decision.id.desc()).limit(1))
 
 
-def _run_out_payload(run, db: Session, invite_links_generated: bool):
-    created_at = getattr(run, 'created_at', None)
+def _run_out(run, db: Session) -> dict:
     return {
         'id': run.id,
         'title': run.title,
@@ -89,9 +55,8 @@ def _run_out_payload(run, db: Session, invite_links_generated: bool):
         'status': run.status,
         'decision': _latest_decision_text(run.id, run.current_cycle, db),
         'current_cycle': run.current_cycle,
-        'created_at': created_at,
-        'createdAt': created_at,
-        'invite_links_generated': invite_links_generated,
+        'created_at': run.created_at,
+        'invite_links_generated': InviteRepository(db).count_by_run(run.id) > 0,
     }
 
 
@@ -111,43 +76,47 @@ def _repair_legacy_stuck_pivot_state(run, db: Session) -> bool:
     return True
 
 
+def _repair_and_save(run, db: Session) -> bool:
+    repaired = _repair_legacy_stuck_pivot_state(run, db)
+    if repaired:
+        db.commit()
+        db.refresh(run)
+    return repaired
+
+
 def _exports_dir() -> Path:
-    container_exports = Path('/app/exports')
-    if container_exports.exists():
-        return container_exports
+    if EXPORTS_DIR.exists():
+        return EXPORTS_DIR
     return Path(__file__).resolve().parents[3] / 'exports'
 
 
-@router.post('/runs', response_model=RunOut)
 @router.post('/projects', response_model=RunOut)
 def create_run(
     payload: RunCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    svc = _service(db)
-    run = svc.create_run(owner_user_id=current_user.id, title=payload.title, ai_mode_enabled=payload.ai_mode_enabled)
+    run = RunService(db).create_run(
+        owner_user_id=current_user.id, title=payload.title, ai_mode_enabled=payload.ai_mode_enabled
+    )
     db.commit()
     db.refresh(run)
-    return _run_out_payload(run, db, invite_links_generated=False)
+    return _run_out(run, db)
 
 
-@router.get('/runs', response_model=list[RunOut])
 @router.get('/projects', response_model=list[RunOut])
 def list_runs(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    svc = _service(db)
-    runs = svc.list_runs(owner_user_id=current_user.id)
+    runs = RunService(db).list_runs(owner_user_id=current_user.id)
     repaired_any = False
     payloads = []
     for run in runs:
         repaired_any = _repair_legacy_stuck_pivot_state(run, db) or repaired_any
-        payloads.append(_run_out_payload(run, db, invite_links_generated=svc.invite_repo.count_by_run(run.id) > 0))
+        payloads.append(_run_out(run, db))
     if repaired_any:
         db.commit()
     return payloads
 
 
-@router.get('/runs/{run_id}', response_model=RunOut)
 @router.get('/projects/{run_id}', response_model=RunOut)
 def get_run(
     run_id: int,
@@ -155,14 +124,12 @@ def get_run(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_optional_current_user),
 ):
-    svc = _service(db)
+    svc = RunService(db)
     if current_user is not None:
         try:
             run = svc.get_owned_run(run_id=run_id, owner_user_id=current_user.id)
-            if _repair_legacy_stuck_pivot_state(run, db):
-                db.commit()
-                db.refresh(run)
-            return _run_out_payload(run, db, invite_links_generated=svc.invite_repo.count_by_run(run.id) > 0)
+            _repair_and_save(run, db)
+            return _run_out(run, db)
         except ValueError:
             pass
 
@@ -171,15 +138,12 @@ def get_run(
 
     try:
         run = svc.get_run_for_participant(run_id=run_id, participant_id=participant_id)
-        if _repair_legacy_stuck_pivot_state(run, db):
-            db.commit()
-            db.refresh(run)
-        return _run_out_payload(run, db, invite_links_generated=svc.invite_repo.count_by_run(run.id) > 0)
+        _repair_and_save(run, db)
+        return _run_out(run, db)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.patch('/runs/{run_id}', response_model=RunOut)
 @router.patch('/projects/{run_id}', response_model=RunOut)
 def patch_run(
     run_id: int,
@@ -187,9 +151,8 @@ def patch_run(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    svc = _service(db)
     try:
-        run = svc.update_run(
+        run = RunService(db).update_run(
             run_id=run_id,
             owner_user_id=current_user.id,
             ai_mode_enabled=payload.ai_mode_enabled,
@@ -200,29 +163,24 @@ def patch_run(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     db.commit()
     db.refresh(run)
-    return _run_out_payload(run, db, invite_links_generated=svc.invite_repo.count_by_run(run.id) > 0)
+    return _run_out(run, db)
 
 
-@router.delete('/runs/{run_id}', response_model=RunDeleteResponse)
 @router.delete('/projects/{run_id}', response_model=RunDeleteResponse)
 def delete_run(run_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    svc = _service(db)
     try:
-        svc.delete_run(run_id=run_id, owner_user_id=current_user.id)
+        RunService(db).delete_run(run_id=run_id, owner_user_id=current_user.id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     db.commit()
     return RunDeleteResponse(ok=True)
 
 
-@router.post('/runs/{run_id}/advance-phase', response_model=RunOut)
 @router.post('/projects/{run_id}/advance-phase', response_model=RunOut)
 def advance_phase(run_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    svc = _service(db)
+    svc = RunService(db)
     run = svc.get_owned_run(run_id=run_id, owner_user_id=current_user.id)
-    if _repair_legacy_stuck_pivot_state(run, db):
-        db.commit()
-        db.refresh(run)
+    _repair_and_save(run, db)
 
     try:
         run = svc.advance_phase(run_id=run_id, owner_user_id=current_user.id)
@@ -233,17 +191,10 @@ def advance_phase(run_id: int, db: Session = Depends(get_db), current_user: User
 
     db.commit()
     db.refresh(run)
-    return _run_out_payload(run, db, invite_links_generated=svc.invite_repo.count_by_run(run.id) > 0)
+    return _run_out(run, db)
 
 
-@router.post('/runs/{run_id}/decision', response_model=RunOut)
 @router.post('/projects/{run_id}/decision', response_model=RunOut)
-@router.post('/run/{run_id}/decision', response_model=RunOut)
-@router.post('/runs/{run_id}/decisions', response_model=RunOut)
-@router.post('/projects/{run_id}/decisions', response_model=RunOut)
-@router.post('/project/{run_id}/decisions', response_model=RunOut)
-@router.post('/project/{run_id}/decision', response_model=RunOut)
-@router.post('/run/{run_id}/decisions', response_model=RunOut)
 def submit_decision(
     run_id: int,
     payload: DecisionRequest,
@@ -254,28 +205,24 @@ def submit_decision(
     if decision not in ALLOWED_DECISIONS:
         raise HTTPException(status_code=400, detail='Decision must be GO, PIVOT, or ABORT')
 
-    svc = _service(db)
+    svc = RunService(db)
     run = svc.get_owned_run(run_id=run_id, owner_user_id=current_user.id)
-    if _repair_legacy_stuck_pivot_state(run, db):
-        db.commit()
-        db.refresh(run)
+    if _repair_and_save(run, db):
         if decision == 'PIVOT':
-            return _run_out_payload(run, db, invite_links_generated=svc.invite_repo.count_by_run(run.id) > 0)
+            return _run_out(run, db)
         raise HTTPException(status_code=409, detail='Project already pivoted and was restored to phase 2.')
 
     if run.current_phase != 5:
         raise HTTPException(status_code=400, detail='Decision can only be recorded in phase 5')
 
-    existing_decision = _latest_decision_text(run_id=run_id, cycle=run.current_cycle, db=db)
-    if existing_decision:
+    if _latest_decision_text(run_id=run_id, cycle=run.current_cycle, db=db):
         raise HTTPException(status_code=409, detail='Final decision already recorded for this project.')
 
+    decision_cycle = run.current_cycle
     try:
         if decision == 'PIVOT':
-            decision_cycle = run.current_cycle
             run = svc.pivot_run(run_id=run_id, owner_user_id=current_user.id)
         else:
-            decision_cycle = run.current_cycle
             run = svc.finalize_run(run_id=run_id, owner_user_id=current_user.id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -290,19 +237,52 @@ def submit_decision(
     )
     db.commit()
     db.refresh(run)
-    return _run_out_payload(run, db, invite_links_generated=svc.invite_repo.count_by_run(run.id) > 0)
+    return _run_out(run, db)
 
 
-@router.post('/runs/{run_id}/export/pdf', response_model=ExportOut)
+def _canvas_report_text(db: Session, run) -> str:
+    canvas_repo = CanvasRepository(db)
+    questions_by_id = {question.id: question for question in canvas_repo.list_questions()}
+
+    response_by_key: dict[str, str] = {}
+    title_by_key: dict[str, str] = {}
+    for response in canvas_repo.list_responses_by_run(run.id, cycle=run.current_cycle):
+        question = questions_by_id.get(response.question_id)
+        if question is None:
+            continue
+        response_by_key[question.key] = (response.content or '').strip()
+        title_by_key[question.key] = (question.title or '').strip()
+
+    # Canonical fields first, in canvas order, then any field outside the canonical set.
+    extra_keys = sorted(set(response_by_key) - set(CANVAS_KEYS))
+    sections = []
+    for key in [*CANVAS_KEYS, *extra_keys]:
+        title = PDF_CANVAS_TITLES.get(key) or title_by_key.get(key) or key.replace('_', ' ').title()
+        content = response_by_key.get(key, '') or 'Not provided.'
+        sections.append(f'{title}\n{content}')
+    return '\n\n'.join(sections)
+
+
+def _assessment_report_text(db: Session, run_id: int) -> str:
+    aggregates = ScoreService(db).get_aggregates(run_id=run_id)
+    lines = []
+    for metric_key, label in PDF_METRIC_LABELS:
+        info = aggregates.get(metric_key, {})
+        median = float(info.get('median', 0.0) or 0.0)
+        count = int(info.get('count', 0) or 0)
+        responses = f'{count} responses' if count > 0 else 'no responses'
+        lines.append(f'{label}: {median:.2f} median ({responses})')
+    return '\n'.join(lines)
+
+
 @router.post('/projects/{run_id}/export/pdf', response_model=ExportOut)
 def export_pdf(
     run_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    svc = _service(db)
     try:
-        run = svc.get_owned_run(run_id=run_id, owner_user_id=current_user.id)
+        run = RunService(db).get_owned_run(run_id=run_id, owner_user_id=current_user.id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -310,54 +290,15 @@ def export_pdf(
     if latest_decision not in {'GO', 'ABORT'}:
         raise HTTPException(status_code=400, detail='Cannot export before a final decision is submitted')
 
-    canvas_repo = CanvasRepository(db)
-    responses = canvas_repo.list_responses_by_run(run_id, cycle=run.current_cycle)
-    questions_by_id = {question.id: question for question in canvas_repo.list_questions()}
-
-    response_by_key: dict[str, str] = {}
-    title_by_key: dict[str, str] = {}
-    for response in responses:
-        question = questions_by_id.get(response.question_id)
-        if question is None:
-            continue
-        response_by_key[question.key] = (response.content or '').strip()
-        title_by_key[question.key] = (question.title or '').strip()
-
-    phase3_lines: list[str] = []
-    for key in PHASE3_CANVAS_ORDER:
-        title = PHASE3_CANVAS_TITLES.get(key) or title_by_key.get(key) or key.replace('_', ' ').title()
-        content = response_by_key.get(key, '') or 'Not provided.'
-        phase3_lines.append(f'{title}\n{content}')
-
-    extra_keys = sorted(set(response_by_key) - set(PHASE3_CANVAS_ORDER))
-    for key in extra_keys:
-        title = title_by_key.get(key) or key.replace('_', ' ').title()
-        content = response_by_key.get(key, '') or 'Not provided.'
-        phase3_lines.append(f'{title}\n{content}')
-
-    aggregates = _score_service(db).get_aggregates(run_id=run_id)
-    phase4_lines: list[str] = []
-    for metric_key, label in PHASE4_METRIC_ORDER:
-        info = aggregates.get(metric_key, {})
-        median = float(info.get('median', 0.0) or 0.0)
-        count = int(info.get('count', 0) or 0)
-        if count > 0:
-            phase4_lines.append(f'{label}: {median:.2f} median ({count} responses)')
-        else:
-            phase4_lines.append(f'{label}: {median:.2f} median (no responses)')
-
     phase_data = {
-        'Formulated Problem': '\n\n'.join(phase3_lines) or 'No canvas entries.',
-        'Assessment Medians': '\n'.join(phase4_lines),
+        'Formulated Problem': _canvas_report_text(db, run),
+        'Assessment Medians': _assessment_report_text(db, run_id),
     }
-
-    normalized_decision = (latest_decision or '').upper()
-    synthesis_text = (run.problem_synthesis or '').strip()
-    decision_text = f'{normalized_decision}\n{synthesis_text}'.strip()
+    decision_text = f'{latest_decision}\n{(run.problem_synthesis or "").strip()}'.strip()
 
     normalized_project_name = re.sub(r'[^a-z0-9]+', '', str(run.title or '').strip().lower()) or f'project{run_id}'
     out_path = _exports_dir() / f'{normalized_project_name}_report.pdf'
-    file_path = build_pdf(str(out_path), run.title, phase_data, '', decision_text)
+    file_path = build_pdf(str(out_path), run.title, phase_data, decision_text)
 
     export = Export(run_id=run_id, file_path=file_path)
     db.add(export)
@@ -366,7 +307,6 @@ def export_pdf(
     return ExportOut(export_id=export.id, file_path=export.file_path)
 
 
-@router.get('/runs/{run_id}/export/{export_id}')
 @router.get('/projects/{run_id}/export/{export_id}')
 def download_export(
     run_id: int,
@@ -374,8 +314,7 @@ def download_export(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    svc = _service(db)
-    svc.get_owned_run(run_id=run_id, owner_user_id=current_user.id)
+    RunService(db).get_owned_run(run_id=run_id, owner_user_id=current_user.id)
     export = db.get(Export, export_id)
     if not export or export.run_id != run_id:
         raise HTTPException(status_code=404, detail='Export not found')
@@ -384,12 +323,10 @@ def download_export(
     return FileResponse(export.file_path, filename=Path(export.file_path).name)
 
 
-@router.get('/runs/{run_id}/participants', response_model=list[ParticipantOut])
 @router.get('/projects/{run_id}/participants', response_model=list[ParticipantOut])
 def list_participants(run_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    svc = _service(db)
     try:
-        participants = svc.list_participants(run_id=run_id, owner_user_id=current_user.id)
+        participants = RunService(db).list_participants(run_id=run_id, owner_user_id=current_user.id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return [

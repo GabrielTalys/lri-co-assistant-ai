@@ -27,7 +27,7 @@ export default function NewProjectPage({ token }) {
   }
 
   return (
-    <section className="card form-card">
+    <section className="card">
       <h1>Create Project</h1>
       <p className="muted">Title is required.</p>
       <form onSubmit={createProject} className="form-grid">

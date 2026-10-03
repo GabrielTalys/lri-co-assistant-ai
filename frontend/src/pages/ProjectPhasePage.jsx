@@ -4,61 +4,64 @@ import FieldEditor from "../components/FieldEditor";
 import LoadingState from "../components/LoadingState";
 import PhaseStepper from "../components/PhaseStepper";
 import {
-  enumToPhaseNumber,
-  phaseConfig,
-  phaseLabels,
-} from "../config/phaseConfig";
+  CANVAS_FIELDS,
+  FIELD_LABELS,
+  FIELD_PLACEHOLDERS,
+  PHASE3_FIELD_LABELS,
+} from "../config/canvasFields";
+import { phaseConfig, phaseLabels } from "../config/phaseConfig";
 import { API_URL, api } from "../services/api";
+import { readParticipantSession } from "../services/participantSession";
 
-const phaseFields = {
-  1: [
-    "problem",
-    "stakeholders",
-    "research_questions",
-    "hypotheses",
-    "method",
-    "evaluation",
-    "risks",
-  ],
-  2: [
-    "problem",
-    "stakeholders",
-    "research_questions",
-    "hypotheses",
-    "method",
-    "evaluation",
-    "risks",
-  ],
-  3: [
-    "problem",
-    "stakeholders",
-    "research_questions",
-    "hypotheses",
-    "method",
-    "evaluation",
-    "risks",
-  ],
-  4: [],
-  5: ["observations"],
-};
+// The canvas is edited in phases 1-3; phases 4 and 5 have no canvas fields.
+const phaseFields = { 1: CANVAS_FIELDS, 2: CANVAS_FIELDS, 3: CANVAS_FIELDS };
 
-const scoreCriterionToMetric = {
-  valuable: "impact",
-  feasible: "feasibility",
-  applicable: "alignment",
-};
-
-const phase5ResultOrder = [
-  { metricKey: "impact", label: "Value" },
-  { metricKey: "alignment", label: "Applicability" },
-  { metricKey: "feasibility", label: "Feasibility" },
+// The three assessment criteria, in the order the assessment form and the
+// results show them.
+const assessmentCriteria = [
+  {
+    key: "valuable",
+    metricKey: "impact",
+    label: "Valuable",
+    resultLabel: "Value",
+    anchors: { left: "Not Valuable", right: "Valuable" },
+    description:
+      "Valuable: To what extent does addressing the formulated problem have the potential to generate meaningful value for industrial practice?",
+  },
+  {
+    key: "applicable",
+    metricKey: "alignment",
+    label: "Applicable",
+    resultLabel: "Applicability",
+    anchors: { left: "Not Applicable", right: "Applicable" },
+    description:
+      "Applicable: To what extent can the expected results of this formulated research problem be realistically applied in real industry scenarios (considering factors such as adoption potential, contextual fit, and stakeholder willingness to use the outcomes)?",
+  },
+  {
+    key: "feasible",
+    metricKey: "feasibility",
+    label: "Feasible",
+    resultLabel: "Feasibility",
+    anchors: { left: "Not Feasible", right: "Feasible" },
+    description:
+      "Feasible: To what extent can this research problem be realistically investigated with the resources typically available?",
+  },
 ];
+// Scores are stored in submission order, which is the order phase 5 lists each
+// participant's comments in.
+const assessmentSubmitOrder = ["valuable", "feasible", "applicable"];
+const criterionByKey = Object.fromEntries(
+  assessmentCriteria.map((criterion) => [criterion.key, criterion])
+);
+const criterionLabelByMetric = Object.fromEntries(
+  assessmentCriteria.map((criterion) => [criterion.metricKey, criterion.label])
+);
 
-const metricKeyToCriterionLabel = {
-  impact: "Valuable",
-  alignment: "Applicable",
-  feasibility: "Feasible",
-};
+function criteriaState(value) {
+  return Object.fromEntries(
+    assessmentCriteria.map((criterion) => [criterion.key, value])
+  );
+}
 
 const phase5DecisionMessages = {
   GO: "The formulated problem received a 'Go' because of its high perceived relevance!",
@@ -66,27 +69,6 @@ const phase5DecisionMessages = {
     "The formulated problem was aborted because of its low perceived relevance!",
   PIVOT:
     "The formulated problem was selected for reformulation before continuing.",
-};
-
-const phase5FinalDecisionMessages = {
-  GO: "The formulated problem received a 'Go' because of its high perceived relevance!",
-  ABORT:
-    "The formulated problem was aborted because of its low perceived relevance!",
-};
-
-const semanticAnchors = {
-  valuable: { left: "Not Valuable", right: "Valuable" },
-  applicable: { left: "Not Applicable", right: "Applicable" },
-  feasible: { left: "Not Feasible", right: "Feasible" },
-};
-
-const assessmentCriterionDescriptions = {
-  valuable:
-    "Valuable: To what extent does addressing the formulated problem have the potential to generate meaningful value for industrial practice?",
-  applicable:
-    "Applicable: To what extent can the expected results of this formulated research problem be realistically applied in real industry scenarios (considering factors such as adoption potential, contextual fit, and stakeholder willingness to use the outcomes)?",
-  feasible:
-    "Feasible: To what extent can this research problem be realistically investigated with the resources typically available?",
 };
 
 const phase5Decisions = ["GO", "PIVOT", "ABORT"];
@@ -109,56 +91,13 @@ function aiSpecialistToDraft(specialist) {
   };
 }
 
-const phase3CanvasTitles = {
-  problem: "For the practical problem (what/how/why)",
-  stakeholders: "Involved in the context (where/when)",
-  research_questions: "Which bring the following implications/impacts (why) ",
-  hypotheses: "For the stakeholders (who)",
-  method: "We have the following evidence (how)",
-  evaluation: "And we want to investigate - objective (what/how)",
-  risks: "Answering the following research questions (what)",
-};
-
-const canonicalCanvasKeys = new Set([
-  "problem",
-  "stakeholders",
-  "research_questions",
-  "hypotheses",
-  "method",
-  "evaluation",
-  "risks",
-]);
-
-const legacyCanvasKeyAliases = {
-  describe_the_pain_point: "problem",
-  characterize_the_environment: "stakeholders",
-  consequences_benefits: "research_questions",
-  identify_people_involved: "hypotheses",
-  what_scientific_evidence: "method",
-  define_the_objectives: "evaluation",
-  what_research_questions: "risks",
-};
-
-function normalizeCanvasKey(rawKey) {
-  if (!rawKey) return null;
-  const normalized = String(rawKey)
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-
-  if (!normalized) return null;
-  if (canonicalCanvasKeys.has(normalized)) return normalized;
-  return legacyCanvasKeyAliases[normalized] || null;
-}
-
 function mapCanvasItems(items) {
   const nextEntries = {};
   const nextSuggestions = {};
 
   for (const item of items || []) {
-    const key = normalizeCanvasKey(item.question_key);
-    if (!key) continue;
+    const key = item.question_key;
+    if (!CANVAS_FIELDS.includes(key)) continue;
 
     if (item.response) {
       nextEntries[key] = item.response.content || "";
@@ -185,15 +124,7 @@ export default function ProjectPhasePage({ token, me }) {
   const routePhase = Number(phaseNumber);
   const isParticipant = searchParams.get("mode") === "participant";
 
-  const participantSession = useMemo(() => {
-    const raw = localStorage.getItem("participant");
-    if (!raw) return null;
-    try {
-      return JSON.parse(raw);
-    } catch {
-      return null;
-    }
-  }, []);
+  const participantSession = useMemo(readParticipantSession, []);
 
   const participantIdFromQuery =
     Number(searchParams.get("participantId")) || null;
@@ -239,21 +170,13 @@ export default function ProjectPhasePage({ token, me }) {
     []
   );
   const [resettingAiEvaluationId, setResettingAiEvaluationId] = useState(null);
-  const [assessment, setAssessment] = useState({
-    valuable: 1,
-    feasible: 1,
-    applicable: 1,
-  });
-  const [assessmentComments, setAssessmentComments] = useState({
-    valuable: "",
-    feasible: "",
-    applicable: "",
-  });
-  const [assessmentSaved, setAssessmentSaved] = useState({
-    valuable: false,
-    feasible: false,
-    applicable: false,
-  });
+  const [assessment, setAssessment] = useState(() => criteriaState(1));
+  const [assessmentComments, setAssessmentComments] = useState(() =>
+    criteriaState("")
+  );
+  const [assessmentSaved, setAssessmentSaved] = useState(() =>
+    criteriaState(false)
+  );
   const [completionInfo, setCompletionInfo] = useState({
     all_done: false,
     required_respondents: 0,
@@ -278,11 +201,14 @@ export default function ProjectPhasePage({ token, me }) {
   const config = phaseConfig[routePhase] || phaseConfig[1];
   const fields = phaseFields[routePhase] || [];
   const suggestionsEnabled = routePhase === 1;
+  const isFieldFilled = (field) =>
+    String(entries[field] || "").trim().length > 0;
+  const filledBoardFields = fields.filter(isFieldFilled);
+  const emptyBoardFields = fields.filter((field) => !isFieldFilled(field));
 
   const participantQuery = isParticipant
     ? `?participant_id=${participantId}`
     : "";
-  const currentPhaseNumber = enumToPhaseNumber(project?.current_phase);
   // The facilitator can reopen completed phases read-only; guests always follow
   // the project's current phase.
   const serverPhaseNumber = Number(project?.current_phase || 0);
@@ -412,7 +338,7 @@ export default function ProjectPhasePage({ token, me }) {
       await fetchAiSpecialists();
 
       if (isParticipant && routePhase === 4 && participantId) {
-        await hydrateParticipantAssessment(participantId);
+        await hydrateParticipantAssessment();
       }
       if (!isParticipant && routePhase === 4) {
         await refreshCompletion();
@@ -438,7 +364,7 @@ export default function ProjectPhasePage({ token, me }) {
 
   useEffect(() => {
     if (!project) return;
-    const serverPhase = Number(project.current_phase || 1);
+    const serverPhase = currentServerPhase(project);
     if (shouldFollowServerPhase(serverPhase)) {
       navigate(participantRoute(serverPhase), { replace: true });
     }
@@ -453,12 +379,11 @@ export default function ProjectPhasePage({ token, me }) {
   }, [project?.current_phase, project?.decision, routePhase]);
 
   useEffect(() => {
+    setInviteeName("");
     if (isParticipant) {
-      setInviteeName("");
       setGeneratedInvites([]);
       return;
     }
-    setInviteeName("");
     if (routePhase !== 2) return;
     fetchInvites()
       .then((invites) => setGeneratedInvites(invites))
@@ -470,12 +395,10 @@ export default function ProjectPhasePage({ token, me }) {
     const interval = setInterval(async () => {
       try {
         const latest = await fetchProjectState();
+        setProject((prev) => ({ ...prev, ...latest }));
         const latestPhase = currentServerPhase(latest);
         if (shouldFollowServerPhase(latestPhase)) {
-          setProject((prev) => ({ ...prev, ...latest }));
           navigate(participantRoute(latestPhase), { replace: true });
-        } else {
-          setProject((prev) => ({ ...prev, ...latest }));
         }
       } catch {
         // Keep silent during polling to avoid noisy UX.
@@ -501,17 +424,13 @@ export default function ProjectPhasePage({ token, me }) {
     problemSynthesisRef.current = problemSynthesis;
   }, [problemSynthesis]);
 
+  // A new project, cycle or phase drops the previous one's sync state and any
+  // AI generation still in flight.
   useEffect(() => {
     lastSyncedCanvasRef.current = {};
-  }, [projectId, project?.current_cycle, routePhase]);
-
-  useEffect(() => {
     phase1RecommendationGenerationRef.current += 1;
     setRecommendationPendingByField({});
     setIsGeneratingRecommendations(false);
-  }, [projectId, project?.current_cycle, routePhase]);
-
-  useEffect(() => {
     phase3OverviewGenerationRef.current += 1;
     setPhase3OverviewsByField({});
     setIsPhase3OverviewPending(false);
@@ -520,35 +439,19 @@ export default function ProjectPhasePage({ token, me }) {
 
   useEffect(() => {
     return () => {
-      if (actionMessageTimerRef.current) {
-        clearTimeout(actionMessageTimerRef.current);
-      }
-      if (problemSynthesisSaveTimerRef.current) {
-        clearTimeout(problemSynthesisSaveTimerRef.current);
-      }
-      for (const timer of Object.values(saveTimersRef.current || {})) {
-        clearTimeout(timer);
-      }
-      saveTimersRef.current = {};
+      clearActionMessageTimer();
+      clearProblemSynthesisSaveTimer();
+      clearPendingFieldSaveTimers();
     };
   }, []);
 
   useEffect(() => {
-    for (const timer of Object.values(saveTimersRef.current || {})) {
-      clearTimeout(timer);
-    }
-    saveTimersRef.current = {};
-    if (problemSynthesisSaveTimerRef.current) {
-      clearTimeout(problemSynthesisSaveTimerRef.current);
-      problemSynthesisSaveTimerRef.current = null;
-    }
+    clearPendingFieldSaveTimers();
+    clearProblemSynthesisSaveTimer();
   }, [projectId, routePhase]);
 
   useEffect(() => {
-    if (actionMessageTimerRef.current) {
-      clearTimeout(actionMessageTimerRef.current);
-      actionMessageTimerRef.current = null;
-    }
+    clearActionMessageTimer();
     setActionMessage("");
   }, [routePhase]);
 
@@ -567,13 +470,23 @@ export default function ProjectPhasePage({ token, me }) {
     lastSavedProblemSynthesisRef.current = nextSynthesis;
   }, [project?.id, project?.current_cycle, project?.problem_synthesis]);
 
-  function setTimedActionMessage(message, durationMs = 0) {
-    setActionMessage(message);
-
+  function clearActionMessageTimer() {
     if (actionMessageTimerRef.current) {
       clearTimeout(actionMessageTimerRef.current);
       actionMessageTimerRef.current = null;
     }
+  }
+
+  function clearProblemSynthesisSaveTimer() {
+    if (problemSynthesisSaveTimerRef.current) {
+      clearTimeout(problemSynthesisSaveTimerRef.current);
+      problemSynthesisSaveTimerRef.current = null;
+    }
+  }
+
+  function setTimedActionMessage(message, durationMs = 0) {
+    setActionMessage(message);
+    clearActionMessageTimer();
 
     if (durationMs > 0) {
       actionMessageTimerRef.current = setTimeout(() => {
@@ -607,20 +520,21 @@ export default function ProjectPhasePage({ token, me }) {
     );
   }
 
+  async function putCanvasResponse(field, content) {
+    await api(
+      `/projects/${projectId}/canvas/${encodeURIComponent(field)}/response`,
+      "PUT",
+      { participant_id: actorParticipantId, content },
+      token
+    );
+    lastSyncedCanvasRef.current[field] = content ?? "";
+  }
+
   async function saveEntry(field, content, explicit = false) {
     if (!project || !actorParticipantId) return;
 
     try {
-      await api(
-        `/projects/${projectId}/canvas/${encodeURIComponent(field)}/response`,
-        "PUT",
-        {
-          participant_id: actorParticipantId,
-          content,
-        },
-        token
-      );
-      lastSyncedCanvasRef.current[field] = content ?? "";
+      await putCanvasResponse(field, content);
       if (explicit) setTimedActionMessage("Saved.", 4000);
     } catch (err) {
       setActionMessage(err.message);
@@ -661,13 +575,8 @@ export default function ProjectPhasePage({ token, me }) {
   }
 
   function handleProblemSynthesisChange(event) {
-    const nextValue = event.target.value;
-    setProblemSynthesis(nextValue);
-
-    if (problemSynthesisSaveTimerRef.current) {
-      clearTimeout(problemSynthesisSaveTimerRef.current);
-    }
-
+    setProblemSynthesis(event.target.value);
+    clearProblemSynthesisSaveTimer();
     problemSynthesisSaveTimerRef.current = setTimeout(() => {
       void persistProblemSynthesis(false);
       problemSynthesisSaveTimerRef.current = null;
@@ -675,10 +584,7 @@ export default function ProjectPhasePage({ token, me }) {
   }
 
   async function handleProblemSynthesisBlur() {
-    if (problemSynthesisSaveTimerRef.current) {
-      clearTimeout(problemSynthesisSaveTimerRef.current);
-      problemSynthesisSaveTimerRef.current = null;
-    }
+    clearProblemSynthesisSaveTimer();
     await persistProblemSynthesis(true);
   }
 
@@ -692,16 +598,7 @@ export default function ProjectPhasePage({ token, me }) {
 
     try {
       for (const field of editedFields) {
-        await api(
-          `/projects/${projectId}/canvas/${encodeURIComponent(field)}/response`,
-          "PUT",
-          {
-            participant_id: actorParticipantId,
-            content: entries[field] ?? "",
-          },
-          token
-        );
-        lastSyncedCanvasRef.current[field] = entries[field] ?? "";
+        await putCanvasResponse(field, entries[field] ?? "");
       }
       return true;
     } catch (err) {
@@ -722,21 +619,14 @@ export default function ProjectPhasePage({ token, me }) {
       return;
     }
 
-    const filledFields = fields.filter(
-      (field) => String(entries[field] || "").trim().length > 0
-    );
-    const emptyFields = fields.filter(
-      (field) => String(entries[field] || "").trim().length === 0
-    );
-
-    if (filledFields.length === 0) {
+    if (filledBoardFields.length === 0) {
       setActionMessage(
         "Fill at least one board field before requesting recommendations."
       );
       return;
     }
 
-    if (emptyFields.length === 0) {
+    if (emptyBoardFields.length === 0) {
       setTimedActionMessage("All board fields are already filled.", 2500);
       return;
     }
@@ -749,12 +639,12 @@ export default function ProjectPhasePage({ token, me }) {
     const generationId = phase1RecommendationGenerationRef.current + 1;
     phase1RecommendationGenerationRef.current = generationId;
     setRecommendationPendingByField(
-      Object.fromEntries(emptyFields.map((field) => [field, true]))
+      Object.fromEntries(emptyBoardFields.map((field) => [field, true]))
     );
 
     try {
       const failures = [];
-      const tasks = emptyFields.map((field) =>
+      const tasks = emptyBoardFields.map((field) =>
         api(
           `/projects/${projectId}/canvas/${encodeURIComponent(
             field
@@ -794,7 +684,7 @@ export default function ProjectPhasePage({ token, me }) {
       await Promise.allSettled(tasks);
       if (phase1RecommendationGenerationRef.current !== generationId) return;
 
-      const generatedCount = emptyFields.length - failures.length;
+      const generatedCount = emptyBoardFields.length - failures.length;
       if (generatedCount > 0 && failures.length === 0) {
         setTimedActionMessage(
           `${generatedCount} recommendation${
@@ -942,28 +832,15 @@ export default function ProjectPhasePage({ token, me }) {
     if (isParticipant || !project || !actorParticipantId) return;
 
     const currentEntries = entriesRef.current || {};
-    const syncFields = fields.filter(
-      (field) =>
-        canonicalCanvasKeys.has(field) &&
-        Object.prototype.hasOwnProperty.call(currentEntries, field)
-    );
-    if (syncFields.length === 0) return;
-
-    for (const field of syncFields) {
+    for (const field of fields) {
+      if (!Object.prototype.hasOwnProperty.call(currentEntries, field)) {
+        continue;
+      }
       const content = currentEntries[field] ?? "";
       if (lastSyncedCanvasRef.current[field] === content) continue;
 
       try {
-        await api(
-          `/projects/${projectId}/canvas/${encodeURIComponent(field)}/response`,
-          "PUT",
-          {
-            participant_id: actorParticipantId,
-            content,
-          },
-          token
-        );
-        lastSyncedCanvasRef.current[field] = content;
+        await putCanvasResponse(field, content);
       } catch {
         // Silent by design: polling autosave should not interrupt UX.
       }
@@ -1084,7 +961,7 @@ export default function ProjectPhasePage({ token, me }) {
     }
   }
 
-  async function loadScores() {
+  async function fetchScores() {
     if (isParticipant) {
       return api(
         `/projects/${projectId}/scores?participant_id=${participantId}`,
@@ -1094,33 +971,33 @@ export default function ProjectPhasePage({ token, me }) {
     return api(`/projects/${projectId}/scores`, "GET", null, token);
   }
 
-  async function hydrateParticipantAssessment(currentParticipantId) {
+  function applyScoreSummary(data) {
+    setResultsInfo(data.criteria || null);
+    setCommentsInfo(Array.isArray(data.comments) ? data.comments : []);
+    setAiEvaluations(
+      Array.isArray(data.ai_evaluations) ? data.ai_evaluations : []
+    );
+  }
+
+  async function hydrateParticipantAssessment() {
     try {
-      const data = await api(
-        `/projects/${projectId}/scores?participant_id=${currentParticipantId}`,
-        "GET",
-        null,
-        token
-      );
+      const data = await fetchScores();
       const participantScores = data.participant_scores || {};
-      const nextAssessment = {
-        valuable: participantScores.impact || 1,
-        feasible: participantScores.feasibility || 1,
-        applicable: participantScores.alignment || 1,
-      };
       const participantComments = data.participant_comments || {};
-      const nextComments = {
-        valuable: participantComments.impact || "",
-        feasible: participantComments.feasibility || "",
-        applicable: participantComments.alignment || "",
-      };
-      setAssessment(nextAssessment);
-      setAssessmentComments(nextComments);
-      setAssessmentSaved({
-        valuable: Boolean(participantScores.impact != null),
-        feasible: Boolean(participantScores.feasibility != null),
-        applicable: Boolean(participantScores.alignment != null),
-      });
+      const byCriterion = (valueOf) =>
+        Object.fromEntries(
+          assessmentCriteria.map(({ key, metricKey }) => [
+            key,
+            valueOf(metricKey),
+          ])
+        );
+      setAssessment(byCriterion((metric) => participantScores[metric] || 1));
+      setAssessmentComments(
+        byCriterion((metric) => participantComments[metric] || "")
+      );
+      setAssessmentSaved(
+        byCriterion((metric) => participantScores[metric] != null)
+      );
     } catch {
       // Non-blocking: participant can still fill and submit.
     }
@@ -1128,12 +1005,7 @@ export default function ProjectPhasePage({ token, me }) {
 
   async function loadResults() {
     try {
-      const data = await loadScores();
-      setResultsInfo(data.criteria || null);
-      setCommentsInfo(Array.isArray(data.comments) ? data.comments : []);
-      setAiEvaluations(
-        Array.isArray(data.ai_evaluations) ? data.ai_evaluations : []
-      );
+      applyScoreSummary(await fetchScores());
     } catch {
       setResultsInfo(null);
       setCommentsInfo([]);
@@ -1145,28 +1017,14 @@ export default function ProjectPhasePage({ token, me }) {
     if (isParticipant) return;
 
     try {
-      const scoresData = await api(
-        `/projects/${projectId}/scores`,
-        "GET",
-        null,
-        token
-      );
-      const criteria = scoresData.criteria || {};
+      const scoresData = await fetchScores();
       setCompletionInfo({
         all_done: Boolean(scoresData.all_done),
         required_respondents: Number(scoresData.required_respondents || 0),
         completed_respondents: Number(scoresData.completed_respondents || 0),
         pending_invites: Number(scoresData.pending_invites || 0),
       });
-      setResultsInfo(criteria || null);
-      setCommentsInfo(
-        Array.isArray(scoresData.comments) ? scoresData.comments : []
-      );
-      setAiEvaluations(
-        Array.isArray(scoresData.ai_evaluations)
-          ? scoresData.ai_evaluations
-          : []
-      );
+      applyScoreSummary(scoresData);
     } catch (err) {
       setCompletionInfo({
         all_done: false,
@@ -1355,7 +1213,7 @@ export default function ProjectPhasePage({ token, me }) {
   async function saveAssessmentCriterion(criterion, value, comment) {
     if (!actorParticipantId || !value) return false;
 
-    const metricKey = scoreCriterionToMetric[criterion];
+    const metricKey = criterionByKey[criterion]?.metricKey;
     if (!metricKey) return;
 
     try {
@@ -1386,22 +1244,14 @@ export default function ProjectPhasePage({ token, me }) {
   async function submitAssessment() {
     if (!actorParticipantId) return;
 
-    const criteria = ["valuable", "feasible", "applicable"];
-    let hadError = false;
-
-    for (const criterion of criteria) {
+    for (const criterion of assessmentSubmitOrder) {
       if (assessmentSaved[criterion]) continue;
-      const ok = await saveAssessmentCriterion(
+      await saveAssessmentCriterion(
         criterion,
         assessment[criterion],
         assessmentComments[criterion]
       );
-      if (!ok) {
-        hadError = true;
-      }
     }
-
-    if (!hadError) return;
   }
 
   async function editAssessment() {
@@ -1413,11 +1263,7 @@ export default function ProjectPhasePage({ token, me }) {
         null,
         token
       );
-      setAssessmentSaved({
-        valuable: false,
-        feasible: false,
-        applicable: false,
-      });
+      setAssessmentSaved(criteriaState(false));
       setActionMessage(
         "Assessment unlocked for editing. Please submit again when finished."
       );
@@ -1449,75 +1295,45 @@ export default function ProjectPhasePage({ token, me }) {
     );
   }
 
-  function handleDecisionSelect(decision) {
-    submitDecision(decision);
-  }
-
   async function submitDecision(decision) {
     if (!token || isParticipant) return;
-    const resolvedRunId = Number(project?.id || projectId);
-    if (!Number.isFinite(resolvedRunId) || resolvedRunId <= 0) {
-      setActionMessage("Invalid project id.");
-      return;
-    }
 
     const synthesisSaved = await persistProblemSynthesis(false);
     if (!synthesisSaved) return;
 
-    const payload = {
-      decision,
-      justification: phase5DecisionMessages[decision] || "",
-    };
-
-    const decisionEndpoints = [
-      `/projects/${resolvedRunId}/decision`,
-      `/projects/${resolvedRunId}/decisions`,
-      `/runs/${resolvedRunId}/decision`,
-      `/runs/${resolvedRunId}/decisions`,
-      `/project/${resolvedRunId}/decision`,
-      `/project/${resolvedRunId}/decisions`,
-      `/run/${resolvedRunId}/decision`,
-      `/run/${resolvedRunId}/decisions`,
-    ];
-
-    let lastError = null;
-
-    for (const path of decisionEndpoints) {
-      try {
-        const updated = await api(path, "POST", payload, token);
-        let nextState = updated;
-        if (decision === "PIVOT") {
-          try {
-            nextState = await fetchProjectState();
-          } catch (refreshErr) {
-            console.warn(
-              "Failed to refresh project after pivot decision.",
-              refreshErr
-            );
-          }
-        }
-
-        setSelectedDecision(nextState.decision || null);
-        setProject((prev) => (prev ? { ...prev, ...nextState } : prev));
-        if (decision === "GO" || decision === "ABORT") {
-          setActionMessage("Decision saved. You can export the PDF now.");
-        } else {
-          const targetPhase = Number(nextState?.current_phase || 2);
-          setActionMessage(
-            "Decision saved. Returning to phase 2 to reformulate."
+    try {
+      const updated = await api(
+        `/projects/${projectId}/decision`,
+        "POST",
+        { decision, justification: phase5DecisionMessages[decision] || "" },
+        token
+      );
+      let nextState = updated;
+      if (decision === "PIVOT") {
+        try {
+          nextState = await fetchProjectState();
+        } catch (refreshErr) {
+          console.warn(
+            "Failed to refresh project after pivot decision.",
+            refreshErr
           );
-          navigate(participantRoute(targetPhase), { replace: true });
-        }
-        return;
-      } catch (err) {
-        lastError = err;
-        if (Number(err?.status) !== 404) {
-          break;
         }
       }
-    }
 
-    setActionMessage(lastError?.message || "Failed to submit decision.");
+      setSelectedDecision(nextState.decision || null);
+      setProject((prev) => (prev ? { ...prev, ...nextState } : prev));
+      if (decision === "GO" || decision === "ABORT") {
+        setActionMessage("Decision saved. You can export the PDF now.");
+      } else {
+        const targetPhase = Number(nextState?.current_phase || 2);
+        setActionMessage(
+          "Decision saved. Returning to phase 2 to reformulate."
+        );
+        navigate(participantRoute(targetPhase), { replace: true });
+      }
+    } catch (err) {
+      setActionMessage(err?.message || "Failed to submit decision.");
+    }
   }
 
   async function exportPdf() {
@@ -1588,20 +1404,13 @@ export default function ProjectPhasePage({ token, me }) {
     routePhase === 4 && canActOnPhase && config.requiresAllParticipantsDone
       ? !completionInfo.all_done
       : false;
-  const filledBoardFields = fields.filter(
-    (field) => String(entries[field] || "").trim().length > 0
-  );
-  const emptyBoardFields = fields.filter(
-    (field) => String(entries[field] || "").trim().length === 0
-  );
   const canvasAdvanceBlocked =
     canActOnPhase && routePhase <= 3 && emptyBoardFields.length > 0;
   const advanceDisabled =
     missingInviteForPhase3 || phase4Blocked || canvasAdvanceBlocked;
-  const assessmentSubmitted =
-    assessmentSaved.valuable &&
-    assessmentSaved.feasible &&
-    assessmentSaved.applicable;
+  const assessmentSubmitted = assessmentCriteria.every(
+    (criterion) => assessmentSaved[criterion.key]
+  );
   const finalDecisionKey = (
     selectedDecision ||
     project?.decision ||
@@ -1609,7 +1418,6 @@ export default function ProjectPhasePage({ token, me }) {
   ).toUpperCase();
   const hasFinalDecision =
     finalDecisionKey === "GO" || finalDecisionKey === "ABORT";
-  const canEditCanvas = canActOnPhase;
   const showRecommendationButton =
     routePhase === 1 && canActOnPhase && Boolean(project?.ai_mode_enabled);
   const showPhase3OverviewButton =
@@ -1630,7 +1438,7 @@ export default function ProjectPhasePage({ token, me }) {
   return (
     <div className="project-layout">
       <PhaseStepper
-        currentPhaseNumber={Number(currentPhaseNumber || 1)}
+        currentPhaseNumber={currentServerPhase(project)}
         activePhaseNumber={routePhase}
         onSelectPhase={
           isParticipant ? undefined : (phase) => navigate(participantRoute(phase))
@@ -1725,6 +1533,10 @@ export default function ProjectPhasePage({ token, me }) {
                 <div key={f}>
                   <FieldEditor
                     field={f}
+                    label={
+                      (routePhase === 3 ? PHASE3_FIELD_LABELS : FIELD_LABELS)[f]
+                    }
+                    placeholder={routePhase === 3 ? "" : FIELD_PLACEHOLDERS[f]}
                     value={entries[f]}
                     suggestion={suggestionsEnabled ? suggestions[f] : null}
                     aiOverviews={
@@ -1738,11 +1550,7 @@ export default function ProjectPhasePage({ token, me }) {
                         ? recommendationPendingByField[f]
                         : false
                     }
-                    readOnly={!canEditCanvas}
-                    labelOverride={
-                      routePhase === 3 ? phase3CanvasTitles[f] : undefined
-                    }
-                    placeholderOverride={routePhase === 3 ? "" : undefined}
+                    readOnly={!canActOnPhase}
                     onChange={fieldChange}
                     onAccept={acceptSuggestion}
                     onDismiss={dismissSuggestion}
@@ -1822,7 +1630,7 @@ export default function ProjectPhasePage({ token, me }) {
           )}
 
           {routePhase === 2 && isReviewMode && (
-            <div className="field-card ai-specialist-card card-stack">
+            <div className="field-card card-stack">
               <div className="invite-card-header">
                 <h3>AI Specialists</h3>
               </div>
@@ -1850,7 +1658,7 @@ export default function ProjectPhasePage({ token, me }) {
           )}
 
           {routePhase === 2 && canActOnPhase && (
-            <div className="field-card ai-specialist-card card-stack">
+            <div className="field-card card-stack">
               <div className="invite-card-header">
                 <h3>AI Specialists (optional)</h3>
                 <p className="muted">
@@ -2034,13 +1842,11 @@ export default function ProjectPhasePage({ token, me }) {
               <h2>Semantic Differential Scale</h2>
               {isParticipant ? (
                 <div className="assessment-grid">
-                  {["valuable", "applicable", "feasible"].map((criterion) => (
+                  {assessmentCriteria.map(({ key: criterion, anchors, description }) => (
                     <div className="field-card" key={criterion}>
-                      <label>{assessmentCriterionDescriptions[criterion]}</label>
+                      <label>{description}</label>
                       <div className="semantic-scale-row">
-                        <span className="semantic-anchor">
-                          {semanticAnchors[criterion].left}
-                        </span>
+                        <span className="semantic-anchor">{anchors.left}</span>
                         <div
                           className="semantic-scale"
                           role="radiogroup"
@@ -2071,9 +1877,7 @@ export default function ProjectPhasePage({ token, me }) {
                             );
                           })}
                         </div>
-                        <span className="semantic-anchor">
-                          {semanticAnchors[criterion].right}
-                        </span>
+                        <span className="semantic-anchor">{anchors.right}</span>
                       </div>
                       {assessmentSaved[criterion] && (
                         <span className="phase-badge">Completed</span>
@@ -2219,7 +2023,7 @@ export default function ProjectPhasePage({ token, me }) {
               <h2>Results</h2>
               {resultsInfo ? (
                 <div className="results-grid">
-                  {phase5ResultOrder.map(({ metricKey, label }) => {
+                  {assessmentCriteria.map(({ metricKey, resultLabel }) => {
                     const info = resultsInfo[metricKey] || {
                       avg: 0,
                       median: 0,
@@ -2236,7 +2040,7 @@ export default function ProjectPhasePage({ token, me }) {
                       >
                         <div className="result-metric-row">
                           <div className="result-metric-text">
-                            <h3>{label}</h3>
+                            <h3>{resultLabel}</h3>
                             <p className="result-summary">
                               Median {displayValue.toFixed(1)} • {responseCount}{" "}
                               {responseCount === 1 ? "response" : "responses"}
@@ -2259,8 +2063,7 @@ export default function ProjectPhasePage({ token, me }) {
                   {hasFinalDecision ? (
                     <>
                       <p className="muted">
-                        {phase5FinalDecisionMessages[finalDecisionKey] ||
-                          `Final decision: ${finalDecisionKey}.`}
+                        {phase5DecisionMessages[finalDecisionKey]}
                       </p>
                       <div className="action-group decision-primary-action">
                         <button
@@ -2288,7 +2091,7 @@ export default function ProjectPhasePage({ token, me }) {
                             className={`btn decision-btn decision-${decision.toLowerCase()} ${
                               selectedDecision === decision ? "selected" : ""
                             }`}
-                            onClick={() => handleDecisionSelect(decision)}
+                            onClick={() => submitDecision(decision)}
                           >
                             {decision}
                           </button>
@@ -2321,7 +2124,7 @@ export default function ProjectPhasePage({ token, me }) {
                                   }-${metricKey}`}
                                 >
                                   <strong>
-                                    {metricKeyToCriterionLabel[metricKey] ||
+                                    {criterionLabelByMetric[metricKey] ||
                                       metricKey}
                                     :
                                   </strong>{" "}
@@ -2355,13 +2158,13 @@ export default function ProjectPhasePage({ token, me }) {
                       >
                         <h3>{evaluation.role_title}</h3>
                         <div className="comment-list">
-                          {phase5ResultOrder.map(({ metricKey, label }) => {
+                          {assessmentCriteria.map(({ metricKey, resultLabel }) => {
                             const entry = evaluation.scores?.[metricKey];
                             if (!entry) return null;
                             return (
                               <p key={metricKey}>
                                 <strong>
-                                  {label}: {entry.value}/7
+                                  {resultLabel}: {entry.value}/7
                                 </strong>{" "}
                                 {entry.comment}
                               </p>
@@ -2416,13 +2219,7 @@ export default function ProjectPhasePage({ token, me }) {
                 onClick={advancePhase}
                 disabled={advanceDisabled}
               >
-                {routePhase === 1
-                  ? "Advance to Phase 2"
-                  : routePhase === 2
-                  ? "Advance to Phase 3"
-                  : routePhase === 3
-                  ? "Advance to Phase 4"
-                  : "Advance to Phase 5"}
+                {`Advance to Phase ${Math.min(routePhase + 1, 5)}`}
               </button>
             )}
           </div>

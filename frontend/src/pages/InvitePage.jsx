@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../services/api';
+import { saveParticipantSession } from '../services/participantSession';
 
 export default function InvitePage() {
   const { token } = useParams();
@@ -58,7 +59,7 @@ export default function InvitePage() {
       const safeCompany = String(company || 'invite').toLowerCase().replace(/[^a-z0-9]+/g, '.');
       const guestEmail = `${safeName}.${safeCompany}@invite.local`;
       const data = await api(`/invites/${token}/accept`, 'POST', { email: guestEmail });
-      localStorage.setItem('participant', JSON.stringify(data));
+      saveParticipantSession(data);
 
       const project = await api(`/projects/${data.project_id}?participant_id=${data.participant_id}`, 'GET', null, null);
       const phase = Number(project.current_phase || 1);

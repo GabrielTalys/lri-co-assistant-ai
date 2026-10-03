@@ -10,18 +10,11 @@ class RunRepository:
     def __init__(self, db: Session):
         self.db = db
 
-    def create(
-        self,
-        owner_user_id: int,
-        title: str,
-        ai_mode_enabled: bool = True,
-        problem_synthesis: str | None = None,
-    ) -> Run:
+    def create(self, owner_user_id: int, title: str, ai_mode_enabled: bool = True) -> Run:
         run = Run(
             owner_user_id=owner_user_id,
             title=title,
             ai_mode_enabled=ai_mode_enabled,
-            problem_synthesis=problem_synthesis,
             status=RunStatus.ACTIVE,
         )
         self.db.add(run)
@@ -51,15 +44,6 @@ class RunRepository:
         run.updated_at = datetime.utcnow()
         self.db.flush()
         return run
-
-    def clear_canvas_responses_for_cycle(self, run_id: int, cycle: int) -> None:
-        self.db.execute(
-            delete(CanvasResponse).where(
-                CanvasResponse.run_id == run_id,
-                CanvasResponse.cycle == cycle,
-            )
-        )
-        self.db.flush()
 
     def update(
         self,

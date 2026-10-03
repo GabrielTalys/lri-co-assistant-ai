@@ -16,15 +16,6 @@ class CanvasRepository:
     def get_question_by_key(self, key: str) -> CanvasQuestion | None:
         return self.db.scalar(select(CanvasQuestion).where(CanvasQuestion.key == key))
 
-    def get_question_by_id(self, question_id: int) -> CanvasQuestion | None:
-        return self.db.get(CanvasQuestion, question_id)
-
-    def create_question(self, key: str, title: str, prompt_template: str | None = None) -> CanvasQuestion:
-        question = CanvasQuestion(key=key, title=title, prompt_template=prompt_template)
-        self.db.add(question)
-        self.db.flush()
-        return question
-
     def list_responses_by_run(self, run_id: int, cycle: int) -> list[CanvasResponse]:
         return self.db.scalars(
             select(CanvasResponse)
@@ -67,13 +58,3 @@ class CanvasRepository:
 
         self.db.flush()
         return response
-
-    def list_unanswered_questions(self, run_id: int, cycle: int) -> list[CanvasQuestion]:
-        answered_question_ids = set(
-            self.db.scalars(
-                select(CanvasResponse.question_id)
-                .where(CanvasResponse.run_id == run_id, CanvasResponse.cycle == cycle)
-            ).all()
-        )
-        all_questions = self.list_questions()
-        return [q for q in all_questions if q.id not in answered_question_ids]

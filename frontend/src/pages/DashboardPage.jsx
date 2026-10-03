@@ -1,5 +1,4 @@
-import React from "react";
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
 import LoadingState from '../components/LoadingState';
@@ -20,13 +19,7 @@ export default function DashboardPage({ token }) {
     setError('');
     try {
       const data = await api('/projects', 'GET', null, token);
-      console.log('Projects payload (/projects):', data);
-      setProjects(
-        (data || []).map((project) => ({
-          ...project,
-          created_at: project?.created_at ?? project?.createdAt ?? null,
-        }))
-      );
+      setProjects(data || []);
     } catch (err) {
       setError(err.message);
     } finally {

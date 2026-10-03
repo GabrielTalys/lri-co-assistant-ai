@@ -9,14 +9,7 @@ export const phaseConfig = {
     collaborativeAutoSave: true,
     requiresAllParticipantsDone: true,
   },
-  5: {
-    showInviteLink: false,
-    canSaveDraft: false,
-    canAdvance: false,
-    collaborativeAutoSave: true,
-    canFinalize: true,
-    canExportPdf: true,
-  },
+  5: { showInviteLink: false, canSaveDraft: false, canAdvance: false, collaborativeAutoSave: true },
 };
 
 export const phaseLabels = {
@@ -26,15 +19,3 @@ export const phaseLabels = {
   4: 'Research Problem Assessment',
   5: 'Go/Pivot/Abort Decision',
 };
-
-export function enumToPhaseNumber(enumPhase) {
-  if (!enumPhase) return 1;
-  if (typeof enumPhase === 'number') return enumPhase;
-  const normalized = String(enumPhase).trim();
-  if (/^\d+$/.test(normalized)) return Number(normalized);
-  return Number(normalized.replace('F', ''));
-}
-
-export function phaseNumberToEnum(phaseNumber) {
-  return `F${phaseNumber}`;
-}

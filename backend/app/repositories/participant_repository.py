@@ -26,9 +26,6 @@ class ParticipantRepository:
     def list_by_run(self, run_id: int) -> list[Participant]:
         return self.db.scalars(select(Participant).where(Participant.run_id == run_id).order_by(Participant.id.asc())).all()
 
-    def find_by_user(self, run_id: int, user_id: int) -> Participant | None:
-        return self.db.scalar(select(Participant).where(Participant.run_id == run_id, Participant.user_id == user_id))
-
     def find_by_email(self, run_id: int, email: str) -> Participant | None:
         return self.db.scalar(select(Participant).where(Participant.run_id == run_id, Participant.email == email))
 
