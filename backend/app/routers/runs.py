@@ -1,6 +1,8 @@
 from datetime import datetime
+import os
 from pathlib import Path
 import re
+import tempfile
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
@@ -87,6 +89,9 @@ def _repair_and_save(run, db: Session) -> bool:
 def _exports_dir() -> Path:
     if EXPORTS_DIR.exists():
         return EXPORTS_DIR
+    if os.environ.get('VERCEL'):
+        # Vercel Functions only allow writes to the temp dir.
+        return Path(tempfile.gettempdir()) / 'exports'
     return Path(__file__).resolve().parents[3] / 'exports'
 
 
@@ -275,6 +280,18 @@ def _assessment_report_text(db: Session, run_id: int) -> str:
     return '\n'.join(lines)
 
 
+def _build_report_pdf(db: Session, run, latest_decision: str) -> str:
+    phase_data = {
+        'Formulated Problem': _canvas_report_text(db, run),
+        'Assessment Medians': _assessment_report_text(db, run.id),
+    }
+    decision_text = f'{latest_decision}\n{(run.problem_synthesis or "").strip()}'.strip()
+
+    normalized_project_name = re.sub(r'[^a-z0-9]+', '', str(run.title or '').strip().lower()) or f'project{run.id}'
+    out_path = _exports_dir() / f'{normalized_project_name}_report.pdf'
+    return build_pdf(str(out_path), run.title, phase_data, decision_text)
+
+
 @router.post('/projects/{run_id}/export/pdf', response_model=ExportOut)
 def export_pdf(
     run_id: int,
@@ -290,15 +307,7 @@ def export_pdf(
     if latest_decision not in {'GO', 'ABORT'}:
         raise HTTPException(status_code=400, detail='Cannot export before a final decision is submitted')
 
-    phase_data = {
-        'Formulated Problem': _canvas_report_text(db, run),
-        'Assessment Medians': _assessment_report_text(db, run_id),
-    }
-    decision_text = f'{latest_decision}\n{(run.problem_synthesis or "").strip()}'.strip()
-
-    normalized_project_name = re.sub(r'[^a-z0-9]+', '', str(run.title or '').strip().lower()) or f'project{run_id}'
-    out_path = _exports_dir() / f'{normalized_project_name}_report.pdf'
-    file_path = build_pdf(str(out_path), run.title, phase_data, decision_text)
+    file_path = _build_report_pdf(db, run, latest_decision)
 
     export = Export(run_id=run_id, file_path=file_path)
     db.add(export)
@@ -314,13 +323,18 @@ def download_export(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    RunService(db).get_owned_run(run_id=run_id, owner_user_id=current_user.id)
+    run = RunService(db).get_owned_run(run_id=run_id, owner_user_id=current_user.id)
     export = db.get(Export, export_id)
     if not export or export.run_id != run_id:
         raise HTTPException(status_code=404, detail='Export not found')
-    if not Path(export.file_path).exists():
-        raise HTTPException(status_code=404, detail='File missing')
-    return FileResponse(export.file_path, filename=Path(export.file_path).name)
+    file_path = export.file_path
+    if not Path(file_path).exists():
+        # Serverless instances don't share disk, so the file may be gone: rebuild it.
+        latest_decision = _latest_decision_text(run_id=run.id, cycle=run.current_cycle, db=db, only_final=True)
+        if latest_decision not in {'GO', 'ABORT'}:
+            raise HTTPException(status_code=404, detail='File missing')
+        file_path = _build_report_pdf(db, run, latest_decision)
+    return FileResponse(file_path, filename=Path(file_path).name)
 
 
 @router.get('/projects/{run_id}/participants', response_model=list[ParticipantOut])
